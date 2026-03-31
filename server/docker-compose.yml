@@ -1,0 +1,25 @@
+services:
+  mcp-server:
+    build: ./mcp-server
+    container_name: mcp-server
+    ports:
+      - "3000:3000"
+    env_file: .env
+    restart: unless-stopped
+
+  webrtc-signaling:
+    build: ./webrtc-signaling
+    container_name: webrtc-signaling
+    ports:
+      - "8080:8080"
+    env_file: .env
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-raybanmeta
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
+    depends_on:
+      - mcp-server
+      - webrtc-signaling
+    restart: unless-stopped
