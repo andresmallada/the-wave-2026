@@ -20,13 +20,11 @@ class MCPToolCallRouter {
     let callId = call.id
     let callName = call.name
 
-    NSLog("[ToolCall] Received: %@ (id: %@) args: %@",
-          callName, callId, String(describing: call.args))
+    AppLog("ToolCall", "Received: \(callName) (id: \(callId)) args: \(String(describing: call.args))")
 
     // Circuit breaker: stop sending tool calls after repeated failures
     if consecutiveFailures >= maxConsecutiveFailures {
-      NSLog("[ToolCall] Circuit breaker open (%d consecutive failures), rejecting %@",
-            consecutiveFailures, callId)
+      AppLog("ToolCall", "Circuit breaker open (\(consecutiveFailures) consecutive failures), rejecting \(callId)")
       let errorResult: ToolResult = .failure(
         "Tool execution is temporarily unavailable after \(consecutiveFailures) consecutive failures. " +
         "Please tell the user you cannot complete this action right now and suggest they check the MCP server connection."
@@ -40,7 +38,7 @@ class MCPToolCallRouter {
       let result = await bridge.callTool(name: callName, arguments: call.args)
 
       guard !Task.isCancelled else {
-        NSLog("[ToolCall] Task %@ was cancelled, skipping response", callId)
+        AppLog("ToolCall", "Task \(callId) was cancelled, skipping response")
         return
       }
 
@@ -51,8 +49,7 @@ class MCPToolCallRouter {
         self.consecutiveFailures += 1
       }
 
-      NSLog("[ToolCall] Result for %@ (id: %@): %@",
-            callName, callId, String(describing: result))
+      AppLog("ToolCall", "Result for \(callName) (id: \(callId)): \(String(describing: result))")
 
       let response = self.buildToolResponse(callId: callId, name: callName, result: result)
       sendResponse(response)
@@ -67,7 +64,7 @@ class MCPToolCallRouter {
   func cancelToolCalls(ids: [String]) {
     for id in ids {
       if let task = inFlightTasks[id] {
-        NSLog("[ToolCall] Cancelling in-flight call: %@", id)
+        AppLog("ToolCall", "Cancelling in-flight call: \(id)")
         task.cancel()
         inFlightTasks.removeValue(forKey: id)
       }
@@ -78,7 +75,7 @@ class MCPToolCallRouter {
   /// Cancel all in-flight tool calls (on session stop)
   func cancelAll() {
     for (id, task) in inFlightTasks {
-      NSLog("[ToolCall] Cancelling in-flight call: %@", id)
+      AppLog("ToolCall", "Cancelling in-flight call: \(id)")
       task.cancel()
     }
     inFlightTasks.removeAll()

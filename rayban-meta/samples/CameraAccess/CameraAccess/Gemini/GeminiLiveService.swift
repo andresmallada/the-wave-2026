@@ -31,23 +31,49 @@ class GeminiLiveService: ObservableObject {
   private var receiveTask: Task<Void, Never>?
   private var connectContinuation: CheckedContinuation<Bool, Never>?
   private let delegate = WebSocketDelegate()
-  private var urlSession: URLSession!
+  private var urlSession: URLSession?
   private let sendQueue = DispatchQueue(label: "gemini.send", qos: .userInitiated)
+  private let maxRetries = 2
 
   /// Tool declarations to register with Gemini. Set before calling connect().
   var toolDeclarations: [[String: Any]] = []
-
-  init() {
-    let config = URLSessionConfiguration.default
-    config.timeoutIntervalForRequest = 30
-    self.urlSession = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-  }
 
   func connect() async -> Bool {
     guard let url = GeminiConfig.websocketURL() else {
       connectionState = .error("No API key configured")
       return false
     }
+
+    AppLog("Gemini", "Connecting to: \(url.absoluteString.prefix(80))...")
+
+    for attempt in 0...maxRetries {
+      if attempt > 0 {
+        AppLog("Gemini", "Retry \(attempt)/\(maxRetries) after 1s delay...")
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+      }
+
+      let success = await attemptConnect(url: url)
+      if success { return true }
+    }
+
+    AppLog("ERROR", "All \(maxRetries + 1) connection attempts failed")
+    return false
+  }
+
+  private func attemptConnect(url: URL) async -> Bool {
+    // Clean up any previous attempt — nil callbacks first to prevent stale fires
+    delegate.onOpen = nil
+    delegate.onClose = nil
+    delegate.onError = nil
+    receiveTask?.cancel()
+    receiveTask = nil
+    webSocketTask?.cancel(with: .normalClosure, reason: nil)
+    webSocketTask = nil
+    urlSession?.invalidateAndCancel()
+    let config = URLSessionConfiguration.default
+    config.timeoutIntervalForRequest = 30
+    let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+    self.urlSession = session
 
     connectionState = .connecting
 
@@ -56,6 +82,7 @@ class GeminiLiveService: ObservableObject {
 
       self.delegate.onOpen = { [weak self] protocol_ in
         guard let self else { return }
+        AppLog("Gemini", "WebSocket opened (protocol: \(protocol_ ?? "none"))")
         Task { @MainActor in
           self.connectionState = .settingUp
           self.sendSetupMessage()
@@ -66,26 +93,34 @@ class GeminiLiveService: ObservableObject {
       self.delegate.onClose = { [weak self] code, reason in
         guard let self else { return }
         let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "no reason"
+        AppLog("Gemini", "WebSocket closed: code=\(code.rawValue), reason=\(reasonStr)")
         Task { @MainActor in
+          let wasReady = self.connectionState == .ready
           self.resolveConnect(success: false)
           self.connectionState = .disconnected
           self.isModelSpeaking = false
-          self.onDisconnected?("Connection closed (code \(code.rawValue): \(reasonStr))")
+          if wasReady {
+            self.onDisconnected?("Connection closed (code \(code.rawValue): \(reasonStr))")
+          }
         }
       }
 
       self.delegate.onError = { [weak self] error in
         guard let self else { return }
         let msg = error?.localizedDescription ?? "Unknown error"
+        AppLog("ERROR", "WebSocket error: \(msg)")
         Task { @MainActor in
+          let wasReady = self.connectionState == .ready
           self.resolveConnect(success: false)
           self.connectionState = .error(msg)
           self.isModelSpeaking = false
-          self.onDisconnected?(msg)
+          if wasReady {
+            self.onDisconnected?(msg)
+          }
         }
       }
 
-      self.webSocketTask = self.urlSession.webSocketTask(with: url)
+      self.webSocketTask = session.webSocketTask(with: url)
       self.webSocketTask?.resume()
 
       // Timeout after 15 seconds
@@ -113,6 +148,8 @@ class GeminiLiveService: ObservableObject {
     delegate.onError = nil
     onToolCall = nil
     onToolCallCancellation = nil
+    urlSession?.invalidateAndCancel()
+    urlSession = nil
     connectionState = .disconnected
     isModelSpeaking = false
     resolveConnect(success: false)
@@ -152,8 +189,10 @@ class GeminiLiveService: ObservableObject {
   }
 
   func sendToolResponse(_ response: [String: Any]) {
+    AppLog("Gemini", "Sending toolResponse back to model")
     sendQueue.async { [weak self] in
       self?.sendJSON(response)
+      AppLog("Gemini", "toolResponse sent successfully")
     }
   }
 
@@ -181,18 +220,47 @@ class GeminiLiveService: ObservableObject {
   }
 
   private func sendSetupMessage() {
+    let voice = GeminiConfig.voice
+    let model = GeminiConfig.model
+    let is31 = GeminiConfig.isModel31
+    let lang = GeminiConfig.responseLanguage
+
+    // Thinking config differs by model generation
+    let thinkingConfig: [String: Any]
+    if is31 {
+      let level = GeminiConfig.thinkingLevel
+      thinkingConfig = ["thinkingLevel": level]
+      AppLog("Gemini", "Setup: model=\(model), voice=\(voice), thinkingLevel=\(level), lang=\(lang)")
+    } else {
+      let budget = GeminiConfig.thinkingBudget
+      thinkingConfig = ["thinkingBudget": budget]
+      AppLog("Gemini", "Setup: model=\(model), voice=\(voice), thinkingBudget=\(budget), lang=\(lang)")
+    }
+
+    AppLog("Gemini", "Sending setup with \(toolDeclarations.count) tool declaration(s)")
+    for decl in toolDeclarations {
+      AppLog("Gemini", "  Tool: \(decl["name"] as? String ?? "unknown")")
+    }
+
+    let systemText = GeminiConfig.systemInstruction + "\n\nIMPORTANT: Always respond in \(lang)."
+
     let setup: [String: Any] = [
       "setup": [
-        "model": GeminiConfig.model,
+        "model": model,
         "generationConfig": [
           "responseModalities": ["AUDIO"],
-          "thinkingConfig": [
-            "thinkingBudget": 0
-          ]
+          "speechConfig": [
+            "voiceConfig": [
+              "prebuiltVoiceConfig": [
+                "voiceName": voice
+              ]
+            ]
+          ],
+          "thinkingConfig": thinkingConfig
         ],
         "systemInstruction": [
           "parts": [
-            ["text": GeminiConfig.systemInstruction]
+            ["text": systemText]
           ]
         ],
         "tools": toolDeclarations.isEmpty ? [] as [[String: Any]] : [
@@ -228,7 +296,11 @@ class GeminiLiveService: ObservableObject {
           let string = String(data: data, encoding: .utf8) else {
       return
     }
-    webSocketTask?.send(.string(string)) { _ in }
+    webSocketTask?.send(.string(string)) { error in
+      if let error {
+        AppLog("ERROR", "WebSocket send failed: \(error.localizedDescription)")
+      }
+    }
   }
 
   private func startReceiving() {
@@ -251,11 +323,15 @@ class GeminiLiveService: ObservableObject {
         } catch {
           if !Task.isCancelled {
             let reason = error.localizedDescription
+            AppLog("ERROR", "WebSocket receive failed: \(reason)")
             await MainActor.run {
+              let wasReady = self.connectionState == .ready
               self.resolveConnect(success: false)
               self.connectionState = .disconnected
               self.isModelSpeaking = false
-              self.onDisconnected?(reason)
+              if wasReady {
+                self.onDisconnected?(reason)
+              }
             }
           }
           break
@@ -272,6 +348,7 @@ class GeminiLiveService: ObservableObject {
 
     // Setup complete
     if json["setupComplete"] != nil {
+      AppLog("Gemini", "setupComplete received — connection ready")
       connectionState = .ready
       resolveConnect(success: true)
       return
@@ -289,14 +366,14 @@ class GeminiLiveService: ObservableObject {
 
     // Tool call from model (top-level message, not inside serverContent)
     if let toolCall = GeminiToolCall(json: json) {
-      NSLog("[Gemini] Tool call received: %d function(s)", toolCall.functionCalls.count)
+      AppLog("Gemini", "Tool call received: \(toolCall.functionCalls.count) function(s)")
       onToolCall?(toolCall)
       return
     }
 
     // Tool call cancellation (user interrupted during tool execution)
     if let cancellation = GeminiToolCallCancellation(json: json) {
-      NSLog("[Gemini] Tool call cancellation: %@", cancellation.ids.joined(separator: ", "))
+      AppLog("Gemini", "Tool call cancellation: \(cancellation.ids.joined(separator: ", "))")
       onToolCallCancellation?(cancellation)
       return
     }

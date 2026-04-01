@@ -90,7 +90,9 @@ class GeminiSessionViewModel: ObservableObject {
     let mcpTools = await mcpBridge.fetchTools()
 
     // Set dynamic tool declarations for Gemini
-    geminiService.toolDeclarations = mcpTools.map { $0.toGeminiFunctionDeclaration() }
+    let declarations = mcpTools.map { $0.toGeminiFunctionDeclaration() }
+    AppLog("Session", "MCP connection: \(mcpBridge.connectionState), tools fetched: \(mcpTools.count), declarations: \(declarations.count)")
+    geminiService.toolDeclarations = declarations
 
     // Wire tool call handling
     toolCallRouter = MCPToolCallRouter(bridge: mcpBridge)

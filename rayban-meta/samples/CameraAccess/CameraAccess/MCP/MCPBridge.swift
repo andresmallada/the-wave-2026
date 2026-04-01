@@ -36,10 +36,10 @@ class MCPBridge: ObservableObject {
     switch result {
     case .success(let info):
       connectionState = .connected(info.serverName)
-      NSLog("[MCP] Connected to %@ v%@", info.serverName, info.serverVersion)
+      AppLog("MCP", "Connected to \(info.serverName) v\(info.serverVersion)")
     case .failure(let error):
       connectionState = .unreachable(error.localizedDescription)
-      NSLog("[MCP] Unreachable: %@", error.localizedDescription)
+      AppLog("MCP", "Unreachable: \(error.localizedDescription)")
     }
   }
 
@@ -50,7 +50,7 @@ class MCPBridge: ObservableObject {
       "protocolVersion": "2025-06-18",
       "capabilities": [:] as [String: Any],
       "clientInfo": [
-        "name": "VisionClaw-iOS",
+        "name": "TheWave-iOS",
         "version": "1.0.0"
       ]
     ]
@@ -105,13 +105,17 @@ class MCPBridge: ObservableObject {
     arguments: [String: Any]
   ) async -> ToolResult {
     lastToolCallStatus = .executing(name)
+    AppLog("MCP", "callTool START: \(name) sessionId=\(sessionId ?? "nil") url=\(GeminiConfig.mcpServerURL)")
 
     let params: [String: Any] = [
       "name": name,
       "arguments": arguments
     ]
 
+    let startTime = CFAbsoluteTimeGetCurrent()
     let result = await sendRequest(method: "tools/call", params: params)
+    let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+    AppLog("MCP", "callTool END: \(name) (\(Int(elapsed))ms)")
     switch result {
     case .success(let response):
       if let error = response.error {
@@ -177,11 +181,14 @@ class MCPBridge: ObservableObject {
 
     do {
       request.httpBody = try JSONSerialization.data(withJSONObject: body)
+      AppLog("MCP", "HTTP POST \(method) → \(url.absoluteString)")
       let (data, httpResponse) = try await session.data(for: request)
 
       guard let http = httpResponse as? HTTPURLResponse else {
+        AppLog("MCP", "\(method): not an HTTP response")
         return .failure(MCPError.invalidResponse)
       }
+      AppLog("MCP", "\(method): HTTP \(http.statusCode) (\(data.count) bytes)")
 
       // Capture session ID from initialize response
       if let sid = http.value(forHTTPHeaderField: "Mcp-Session-Id") {

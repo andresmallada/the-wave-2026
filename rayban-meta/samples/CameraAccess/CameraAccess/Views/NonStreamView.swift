@@ -22,6 +22,7 @@ struct NonStreamView: View {
   @ObservedObject var wearablesVM: WearablesViewModel
   @State private var sheetHeight: CGFloat = 300
   @State private var showSettings = false
+  @State private var showDebugConsole = false
 
   var body: some View {
     ZStack {
@@ -33,6 +34,9 @@ struct NonStreamView: View {
           Menu {
             Button("Settings") {
               showSettings = true
+            }
+            Button("Debug Console") {
+              showDebugConsole = true
             }
             Button("Disconnect", role: .destructive) {
               wearablesVM.disconnectGlasses()
@@ -128,6 +132,9 @@ struct NonStreamView: View {
     }
     .sheet(isPresented: $showSettings) {
       SettingsView()
+    }
+    .sheet(isPresented: $showDebugConsole) {
+      DebugConsoleView()
     }
     .sheet(isPresented: $wearablesVM.showGettingStartedSheet) {
       if #available(iOS 16.0, *) {

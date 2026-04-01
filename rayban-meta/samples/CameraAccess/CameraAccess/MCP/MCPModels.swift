@@ -100,10 +100,33 @@ struct MCPTool {
       decl["description"] = desc
     }
     if let schema = inputSchema {
-      decl["parameters"] = schema
+      decl["parameters"] = MCPTool.stripUnsupportedKeys(schema)
     }
     decl["behavior"] = "BLOCKING"
     return decl
+  }
+
+  /// Recursively strip JSON Schema keys that Gemini does not support
+  private static let unsupportedKeys: Set<String> = [
+    "additionalProperties", "$schema", "$id", "$ref",
+    "definitions", "$defs", "default", "examples",
+    "patternProperties", "if", "then", "else",
+    "allOf", "anyOf", "oneOf", "not", "title"
+  ]
+
+  private static func stripUnsupportedKeys(_ schema: [String: Any]) -> [String: Any] {
+    var cleaned = [String: Any]()
+    for (key, value) in schema {
+      if unsupportedKeys.contains(key) { continue }
+      if let dict = value as? [String: Any] {
+        cleaned[key] = stripUnsupportedKeys(dict)
+      } else if let array = value as? [[String: Any]] {
+        cleaned[key] = array.map { stripUnsupportedKeys($0) }
+      } else {
+        cleaned[key] = value
+      }
+    }
+    return cleaned
   }
 }
 

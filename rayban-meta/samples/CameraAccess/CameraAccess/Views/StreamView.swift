@@ -22,6 +22,7 @@ struct StreamView: View {
   @ObservedObject var wearablesVM: WearablesViewModel
   @ObservedObject var geminiVM: GeminiSessionViewModel
   @ObservedObject var webrtcVM: WebRTCSessionViewModel
+  @State private var showDebugConsole = false
 
   var body: some View {
     ZStack {
@@ -55,6 +56,11 @@ struct StreamView: View {
       if geminiVM.isGeminiActive {
         VStack {
           GeminiStatusBar(geminiVM: geminiVM)
+
+          // Audio / Video toggles for Gemini (demo-friendly quick mute)
+          GeminiInputToggles()
+            .padding(.top, 8)
+
           Spacer()
 
           VStack(spacing: 8) {
@@ -94,12 +100,33 @@ struct StreamView: View {
         .padding(.all, 24)
       }
 
+      // Debug console button (top-left)
+      VStack {
+        HStack {
+          Button {
+            showDebugConsole = true
+          } label: {
+            Image(systemName: "ladybug")
+              .foregroundColor(.white)
+              .padding(8)
+              .background(Color.black.opacity(0.5))
+              .clipShape(Circle())
+          }
+          Spacer()
+        }
+        Spacer()
+      }
+      .padding(.all, 12)
+
       // Bottom controls layer
       VStack {
         Spacer()
         ControlsView(viewModel: viewModel, geminiVM: geminiVM, webrtcVM: webrtcVM)
       }
       .padding(.all, 24)
+    }
+    .sheet(isPresented: $showDebugConsole) {
+      DebugConsoleView()
     }
     .onDisappear {
       Task {
@@ -142,6 +169,50 @@ struct StreamView: View {
       Button("OK") { webrtcVM.errorMessage = nil }
     } message: {
       Text(webrtcVM.errorMessage ?? "")
+    }
+  }
+}
+
+// Quick-toggle buttons for muting audio/video to Gemini during a live session
+struct GeminiInputToggles: View {
+  @State private var audioOn = SettingsManager.shared.sendAudioToGemini
+  @State private var videoOn = SettingsManager.shared.sendFramesToGemini
+
+  var body: some View {
+    HStack(spacing: 12) {
+      toggleButton(
+        icon: audioOn ? "mic.fill" : "mic.slash.fill",
+        label: audioOn ? "Mic ON" : "Mic OFF",
+        isOn: audioOn
+      ) {
+        audioOn.toggle()
+        SettingsManager.shared.sendAudioToGemini = audioOn
+      }
+
+      toggleButton(
+        icon: videoOn ? "video.fill" : "video.slash.fill",
+        label: videoOn ? "Video ON" : "Video OFF",
+        isOn: videoOn
+      ) {
+        videoOn.toggle()
+        SettingsManager.shared.sendFramesToGemini = videoOn
+      }
+    }
+  }
+
+  private func toggleButton(icon: String, label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack(spacing: 6) {
+        Image(systemName: icon)
+          .font(.system(size: 14, weight: .semibold))
+        Text(label)
+          .font(.system(size: 12, weight: .medium))
+      }
+      .foregroundColor(isOn ? .white : .white.opacity(0.6))
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .background(isOn ? Color.white.opacity(0.25) : Color.red.opacity(0.5))
+      .cornerRadius(20)
     }
   }
 }

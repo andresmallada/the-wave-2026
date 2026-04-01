@@ -10,10 +10,15 @@ final class SettingsManager {
     case mcpServerURL
     case mcpAuthToken
     case geminiSystemPrompt
+    case geminiVoice
+    case geminiModel
+    case thinkingBudget
+    case responseLanguage
     case webrtcSignalingURL
     case speakerOutputEnabled
     case videoStreamingEnabled
     case videoFrameRate
+    case videoJPEGQuality
     case sendFramesToGemini
     case sendAudioToGemini
     case proactiveNotificationsEnabled
@@ -32,6 +37,63 @@ final class SettingsManager {
     get { defaults.string(forKey: Key.geminiSystemPrompt.rawValue) ?? GeminiConfig.defaultSystemInstruction }
     set { defaults.set(newValue, forKey: Key.geminiSystemPrompt.rawValue) }
   }
+
+  var geminiVoice: String {
+    get { defaults.string(forKey: Key.geminiVoice.rawValue) ?? "Puck" }
+    set { defaults.set(newValue, forKey: Key.geminiVoice.rawValue) }
+  }
+
+  static let availableVoices = [
+    "Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr",
+    "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+    "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
+    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+  ]
+
+  var geminiModel: String {
+    get { defaults.string(forKey: Key.geminiModel.rawValue) ?? GeminiConfig.defaultModel }
+    set { defaults.set(newValue, forKey: Key.geminiModel.rawValue) }
+  }
+
+  static let availableModelIDs: [String] = [
+    "models/gemini-2.5-flash-native-audio-preview-12-2025",
+    "models/gemini-3.1-flash-live-preview"
+  ]
+
+  static func modelLabel(for id: String) -> String {
+    switch id {
+    case "models/gemini-2.5-flash-native-audio-preview-12-2025": return "2.5 Flash Live (12-2025)"
+    case "models/gemini-3.1-flash-live-preview": return "3.1 Flash Live (NEW)"
+    default: return id.replacingOccurrences(of: "models/", with: "")
+    }
+  }
+
+  static let thinkingLevels = ["minimal", "low", "medium", "high"]
+
+  var thinkingBudget: Int {
+    get {
+      let stored = defaults.object(forKey: Key.thinkingBudget.rawValue) as? Int
+      return stored ?? 0
+    }
+    set { defaults.set(newValue, forKey: Key.thinkingBudget.rawValue) }
+  }
+
+  var thinkingLevel: String {
+    get { defaults.string(forKey: "thinkingLevel") ?? "minimal" }
+    set { defaults.set(newValue, forKey: "thinkingLevel") }
+  }
+
+  var isModel31: Bool {
+    geminiModel.contains("3.1")
+  }
+
+  var responseLanguage: String {
+    get { defaults.string(forKey: Key.responseLanguage.rawValue) ?? "Español" }
+    set { defaults.set(newValue, forKey: Key.responseLanguage.rawValue) }
+  }
+
+  static let availableLanguages = ["Español", "English", "Français", "Deutsch", "Italiano", "Português"]
 
   // MARK: - MCP Server
 
@@ -74,6 +136,14 @@ final class SettingsManager {
     set { defaults.set(newValue, forKey: Key.videoFrameRate.rawValue) }
   }
 
+  var videoJPEGQuality: Double {
+    get {
+      let stored = defaults.double(forKey: Key.videoJPEGQuality.rawValue)
+      return stored > 0 ? stored : 0.5
+    }
+    set { defaults.set(newValue, forKey: Key.videoJPEGQuality.rawValue) }
+  }
+
   var sendFramesToGemini: Bool {
     get { defaults.object(forKey: Key.sendFramesToGemini.rawValue) as? Bool ?? true }
     set { defaults.set(newValue, forKey: Key.sendFramesToGemini.rawValue) }
@@ -94,9 +164,10 @@ final class SettingsManager {
   // MARK: - Reset
 
   func resetAll() {
-    for key in [Key.geminiAPIKey, .geminiSystemPrompt, .mcpServerURL, .mcpAuthToken,
+    for key in [Key.geminiAPIKey, .geminiSystemPrompt, .geminiVoice, .geminiModel,
+                .thinkingBudget, .responseLanguage, .mcpServerURL, .mcpAuthToken,
                 .webrtcSignalingURL, .speakerOutputEnabled, .videoStreamingEnabled,
-                .videoFrameRate, .sendFramesToGemini, .sendAudioToGemini,
+                .videoFrameRate, .videoJPEGQuality, .sendFramesToGemini, .sendAudioToGemini,
                 .proactiveNotificationsEnabled] {
       defaults.removeObject(forKey: key.rawValue)
     }

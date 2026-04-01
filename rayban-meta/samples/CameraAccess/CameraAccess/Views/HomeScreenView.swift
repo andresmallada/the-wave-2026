@@ -19,6 +19,7 @@ import SwiftUI
 struct HomeScreenView: View {
   @ObservedObject var viewModel: WearablesViewModel
   @State private var showSettings = false
+  @State private var showDebugConsole = false
 
   var body: some View {
     ZStack {
@@ -31,6 +32,15 @@ struct HomeScreenView: View {
             showSettings = true
           } label: {
             Image(systemName: "gearshape")
+              .resizable()
+              .aspectRatio(contentMode: .fit)
+              .foregroundColor(.black)
+              .frame(width: 24, height: 24)
+          }
+          Button {
+            showDebugConsole = true
+          } label: {
+            Image(systemName: "ladybug")
               .resizable()
               .aspectRatio(contentMode: .fit)
               .foregroundColor(.black)
@@ -94,6 +104,9 @@ struct HomeScreenView: View {
     }
     .sheet(isPresented: $showSettings) {
       SettingsView()
+    }
+    .sheet(isPresented: $showDebugConsole) {
+      DebugConsoleView()
     }
   }
 
