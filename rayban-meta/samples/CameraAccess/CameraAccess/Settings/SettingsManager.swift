@@ -116,9 +116,33 @@ final class SettingsManager {
 
   // MARK: - Audio
 
-  var speakerOutputEnabled: Bool {
-    get { defaults.bool(forKey: Key.speakerOutputEnabled.rawValue) }
+  /// "glasses" | "speaker" | "usb"
+  var audioOutputRoute: String {
+    get {
+      // Migrate legacy boolean value
+      if let legacy = defaults.object(forKey: Key.speakerOutputEnabled.rawValue) as? Bool {
+        defaults.set(legacy ? "speaker" : "glasses", forKey: Key.speakerOutputEnabled.rawValue)
+        return legacy ? "speaker" : "glasses"
+      }
+      return defaults.string(forKey: Key.speakerOutputEnabled.rawValue) ?? "glasses"
+    }
     set { defaults.set(newValue, forKey: Key.speakerOutputEnabled.rawValue) }
+  }
+
+  static let audioOutputRouteIDs: [String] = ["glasses", "speaker", "usb"]
+
+  static func audioOutputLabel(for id: String) -> String {
+    switch id {
+    case "glasses": return "Glasses (Bluetooth)"
+    case "speaker": return "iPhone Speaker"
+    case "usb": return "USB / HDMI"
+    default: return id
+    }
+  }
+
+  /// Legacy helper – true when audio goes through the phone speaker
+  var speakerOutputEnabled: Bool {
+    audioOutputRoute == "speaker"
   }
 
   // MARK: - Video

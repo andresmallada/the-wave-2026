@@ -14,7 +14,7 @@ struct SettingsView: View {
   @State private var thinkingLevel: String = "minimal"
   @State private var responseLanguage: String = "Español"
   @State private var webrtcSignalingURL: String = ""
-  @State private var speakerOutputEnabled: Bool = false
+  @State private var audioOutputRoute: String = "glasses"
   @State private var videoStreamingEnabled: Bool = true
   @State private var videoFrameRate: Double = 3.0
   @State private var videoJPEGQuality: Double = 0.5
@@ -121,8 +121,13 @@ struct SettingsView: View {
           }
         }
 
-        Section(header: Text("Audio"), footer: Text("Speaker Output routes audio to the iPhone speaker instead of the glasses.")) {
-          Toggle("Speaker Output", isOn: $speakerOutputEnabled)
+        Section(header: Text("Audio Output"), footer: Text("Glasses: audio through Ray-Ban speakers via Bluetooth.\nSpeaker: iPhone built-in speaker.\nUSB/HDMI: routes audio through USB-C for capture with OBS.")) {
+          Picker("Output", selection: $audioOutputRoute) {
+            ForEach(SettingsManager.audioOutputRouteIDs, id: \.self) { routeId in
+              Text(SettingsManager.audioOutputLabel(for: routeId)).tag(routeId)
+            }
+          }
+          .pickerStyle(.segmented)
         }
 
         Section(header: Text("Video"), footer: Text("Video Streaming captures frames from the camera. Use the Mic/Video toggles on the streaming screen to control what is sent to Gemini.")) {
@@ -210,7 +215,7 @@ struct SettingsView: View {
     mcpServerURL = settings.mcpServerURL
     mcpAuthToken = settings.mcpAuthToken
     webrtcSignalingURL = settings.webrtcSignalingURL
-    speakerOutputEnabled = settings.speakerOutputEnabled
+    audioOutputRoute = settings.audioOutputRoute
     videoStreamingEnabled = settings.videoStreamingEnabled
     videoFrameRate = settings.videoFrameRate
     videoJPEGQuality = settings.videoJPEGQuality
@@ -228,7 +233,7 @@ struct SettingsView: View {
     settings.mcpServerURL = mcpServerURL.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.mcpAuthToken = mcpAuthToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.webrtcSignalingURL = webrtcSignalingURL.trimmingCharacters(in: .whitespacesAndNewlines)
-    settings.speakerOutputEnabled = speakerOutputEnabled
+    settings.audioOutputRoute = audioOutputRoute
     settings.videoStreamingEnabled = videoStreamingEnabled
     settings.videoFrameRate = videoFrameRate
     settings.videoJPEGQuality = videoJPEGQuality

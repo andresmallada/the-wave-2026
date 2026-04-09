@@ -36,31 +36,60 @@ class AudioManager {
   func setupAudioSession(useIPhoneMode: Bool = false) throws {
     self.useIPhoneMode = useIPhoneMode
     let session = AVAudioSession.sharedInstance()
-    // voiceChat: aggressive echo cancellation (mic + speaker co-located on phone)
-    // videoChat: mild AEC (mic on glasses, speaker on glasses)
-    // When Speaker Output is ON, speaker is on phone so always use voiceChat AEC
-    let forceSpeaker = SettingsManager.shared.speakerOutputEnabled
-    if useIPhoneMode || forceSpeaker {
+    let route = SettingsManager.shared.audioOutputRoute  // "glasses" | "speaker" | "usb"
+
+    switch route {
+    case "speaker":
+      // voiceChat: aggressive AEC (mic + speaker co-located on phone)
       try session.setCategory(
         .playAndRecord,
         mode: .voiceChat,
         options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers]
       )
-    } else {
+    case "usb":
+      // No Bluetooth options — prevents glasses from capturing output.
+      // .defaultToSpeaker makes iOS prefer external output (HDMI) over earpiece.
+      // Mic falls back to iPhone built-in mic.
       try session.setCategory(
         .playAndRecord,
-        mode: .videoChat,
-        options: [.allowBluetoothHFP, .mixWithOthers, .defaultToSpeaker]
+        mode: .default,
+        options: [.mixWithOthers, .defaultToSpeaker]
       )
+    default: // "glasses"
+      if useIPhoneMode {
+        try session.setCategory(
+          .playAndRecord,
+          mode: .voiceChat,
+          options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers]
+        )
+      } else {
+        // videoChat: mild AEC (mic on glasses, speaker on glasses via BT HFP)
+        try session.setCategory(
+          .playAndRecord,
+          mode: .videoChat,
+          options: [.allowBluetoothHFP, .mixWithOthers, .defaultToSpeaker]
+        )
+      }
     }
+
     try session.setPreferredSampleRate(GeminiConfig.inputAudioSampleRate)
     try session.setPreferredIOBufferDuration(0.064)
     try session.setActive(true)
-    if SettingsManager.shared.speakerOutputEnabled {
+
+    if route == "speaker" {
       try session.overrideOutputAudioPort(.speaker)
       NSLog("[Audio] Speaker output override: ON (iPhone speaker)")
+    } else {
+      try session.overrideOutputAudioPort(.none)
     }
-    NSLog("[Audio] Session mode: %@", useIPhoneMode ? "voiceChat (iPhone)" : "videoChat (glasses)")
+
+    // Log actual resolved route for debugging
+    let currentRoute = session.currentRoute
+    let outputs = currentRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }.joined(separator: ", ")
+    let inputs = currentRoute.inputs.map { "\($0.portName)(\($0.portType.rawValue))" }.joined(separator: ", ")
+    NSLog("[Audio] Route setting: %@, mode: %@", route, useIPhoneMode ? "iPhone" : "glasses")
+    NSLog("[Audio] Actual output: %@", outputs)
+    NSLog("[Audio] Actual input: %@", inputs)
 
     setupInterruptionHandling()
     setupAppLifecycleObservers()

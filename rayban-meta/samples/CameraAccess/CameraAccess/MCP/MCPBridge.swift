@@ -273,11 +273,15 @@ class MCPBridge: ObservableObject {
   }
 
   private func mcpEndpointURL() -> URL? {
-    let baseURL = GeminiConfig.mcpServerURL
+    var baseURL = GeminiConfig.mcpServerURL
+      .trimmingCharacters(in: .whitespacesAndNewlines)
     guard !baseURL.isEmpty, baseURL != "YOUR_MCP_SERVER_URL" else { return nil }
-    // Ensure the URL ends with /mcp if it doesn't already
-    let endpoint = baseURL.hasSuffix("/mcp") ? baseURL : baseURL + "/mcp"
-    return URL(string: endpoint)
+    // Strip trailing slashes, then ensure it ends with /mcp/
+    while baseURL.hasSuffix("/") { baseURL.removeLast() }
+    if !baseURL.hasSuffix("/mcp") { baseURL += "/mcp" }
+    // Always add trailing slash (server expects /mcp/ and 307-redirects /mcp)
+    baseURL += "/"
+    return URL(string: baseURL)
   }
 }
 

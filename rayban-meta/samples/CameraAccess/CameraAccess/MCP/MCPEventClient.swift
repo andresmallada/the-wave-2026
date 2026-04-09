@@ -43,7 +43,10 @@ class MCPEventClient {
       return
     }
 
-    let endpoint = baseURL.hasSuffix("/mcp") ? baseURL : baseURL + "/mcp"
+    var endpoint = baseURL
+    while endpoint.hasSuffix("/") { endpoint.removeLast() }
+    if !endpoint.hasSuffix("/mcp") { endpoint += "/mcp" }
+    endpoint += "/"
     guard let url = URL(string: endpoint) else {
       NSLog("[MCP-SSE] Invalid URL: %@", endpoint)
       return
