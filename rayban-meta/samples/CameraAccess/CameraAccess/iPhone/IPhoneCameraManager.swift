@@ -29,7 +29,7 @@ class IPhoneCameraManager: NSObject {
 
   private func configureSession() {
     captureSession.beginConfiguration()
-    captureSession.sessionPreset = .medium
+    captureSession.sessionPreset = .high
 
     // Add back camera input
     guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),

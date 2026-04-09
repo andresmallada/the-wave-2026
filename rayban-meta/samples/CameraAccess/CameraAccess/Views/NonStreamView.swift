@@ -106,6 +106,46 @@ struct NonStreamView: View {
             .font(.system(size: 12, design: .monospaced))
             .foregroundColor(.white.opacity(0.4))
         }
+
+        // HEVC codec toggle
+        HStack {
+          VStack(alignment: .leading, spacing: 2) {
+            Text("HEVC Codec")
+              .font(.system(size: 14, weight: .medium))
+              .foregroundColor(.white)
+            Text("Compressed video → full 720p over BT")
+              .font(.system(size: 11))
+              .foregroundColor(.white.opacity(0.5))
+          }
+          Spacer()
+          Toggle("", isOn: Binding(
+            get: { viewModel.useHEVCCodec },
+            set: { viewModel.updateCodec($0) }
+          ))
+          .labelsHidden()
+          .tint(.green)
+        }
+        .padding(.vertical, 4)
+
+        // Frame rate picker
+        VStack(spacing: 4) {
+          Text("Frame Rate (lower = sharper frames)")
+            .font(.system(size: 13))
+            .foregroundColor(.white.opacity(0.6))
+          HStack(spacing: 6) {
+            ForEach(SettingsManager.availableStreamingFrameRates, id: \.self) { fps in
+              let selected = viewModel.selectedFrameRate == fps
+              Text("\(fps)")
+                .font(.system(size: 13, weight: selected ? .bold : .regular))
+                .foregroundColor(selected ? .black : .white.opacity(0.8))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(selected ? Color.white : Color.white.opacity(0.15))
+                .cornerRadius(8)
+                .onTapGesture { viewModel.updateFrameRate(fps) }
+            }
+          }
+        }
         .padding(.bottom, 12)
 
         CustomButton(

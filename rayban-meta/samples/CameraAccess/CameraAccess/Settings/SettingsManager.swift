@@ -7,10 +7,6 @@ final class SettingsManager {
 
   private enum Key: String {
     case geminiAPIKey
-    case apiBackend
-    case gcpProjectId
-    case gcpRegion
-    case gcpServiceAccountJSON
     case mcpServerURL
     case mcpAuthToken
     case geminiSystemPrompt
@@ -26,58 +22,18 @@ final class SettingsManager {
     case sendFramesToGemini
     case sendAudioToGemini
     case proactiveNotificationsEnabled
+    case streamingResolution
+    case streamingFrameRate
+    case useHEVCCodec
   }
 
   private init() {}
-
-  // MARK: - API Backend
-
-  /// "aistudio" | "vertexai"
-  var apiBackend: String {
-    get { defaults.string(forKey: Key.apiBackend.rawValue) ?? "aistudio" }
-    set { defaults.set(newValue, forKey: Key.apiBackend.rawValue) }
-  }
-
-  var isVertexAI: Bool { apiBackend == "vertexai" }
-
-  static let apiBackendIDs: [String] = ["aistudio", "vertexai"]
-
-  static func apiBackendLabel(for id: String) -> String {
-    switch id {
-    case "aistudio": return "AI Studio"
-    case "vertexai": return "Vertex AI (GCP)"
-    default: return id
-    }
-  }
 
   // MARK: - Gemini
 
   var geminiAPIKey: String {
     get { defaults.string(forKey: Key.geminiAPIKey.rawValue) ?? Secrets.geminiAPIKey }
     set { defaults.set(newValue, forKey: Key.geminiAPIKey.rawValue) }
-  }
-
-  // MARK: - Google Cloud (Vertex AI)
-
-  var gcpProjectId: String {
-    get { defaults.string(forKey: Key.gcpProjectId.rawValue) ?? "" }
-    set { defaults.set(newValue, forKey: Key.gcpProjectId.rawValue) }
-  }
-
-  var gcpRegion: String {
-    get { defaults.string(forKey: Key.gcpRegion.rawValue) ?? "us-central1" }
-    set { defaults.set(newValue, forKey: Key.gcpRegion.rawValue) }
-  }
-
-  static let gcpRegions = [
-    "us-central1", "us-east1", "us-west1",
-    "europe-west1", "europe-west4",
-    "asia-northeast1", "asia-southeast1"
-  ]
-
-  var gcpServiceAccountJSON: String {
-    get { defaults.string(forKey: Key.gcpServiceAccountJSON.rawValue) ?? "" }
-    set { defaults.set(newValue, forKey: Key.gcpServiceAccountJSON.rawValue) }
   }
 
   var geminiSystemPrompt: String {
@@ -210,7 +166,7 @@ final class SettingsManager {
   var videoJPEGQuality: Double {
     get {
       let stored = defaults.double(forKey: Key.videoJPEGQuality.rawValue)
-      return stored > 0 ? stored : 0.5
+      return stored > 0 ? stored : 0.9
     }
     set { defaults.set(newValue, forKey: Key.videoJPEGQuality.rawValue) }
   }
@@ -225,6 +181,29 @@ final class SettingsManager {
     set { defaults.set(newValue, forKey: Key.sendAudioToGemini.rawValue) }
   }
 
+  /// Persisted glasses streaming resolution: "low" | "medium" | "high"
+  var streamingResolution: String {
+    get { defaults.string(forKey: Key.streamingResolution.rawValue) ?? "high" }
+    set { defaults.set(newValue, forKey: Key.streamingResolution.rawValue) }
+  }
+
+  /// Persisted SDK streaming frame rate from glasses (fps)
+  var streamingFrameRate: Int {
+    get {
+      let stored = defaults.integer(forKey: Key.streamingFrameRate.rawValue)
+      return stored > 0 ? stored : 24
+    }
+    set { defaults.set(newValue, forKey: Key.streamingFrameRate.rawValue) }
+  }
+
+  static let availableStreamingFrameRates = [1, 5, 10, 15, 24, 30]
+
+  /// Use HEVC (hvc1) compressed codec instead of raw — drastically reduces BT bandwidth
+  var useHEVCCodec: Bool {
+    get { defaults.object(forKey: Key.useHEVCCodec.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Key.useHEVCCodec.rawValue) }
+  }
+
   // MARK: - Notifications
 
   var proactiveNotificationsEnabled: Bool {
@@ -235,12 +214,12 @@ final class SettingsManager {
   // MARK: - Reset
 
   func resetAll() {
-    for key in [Key.geminiAPIKey, .apiBackend, .gcpProjectId, .gcpRegion,
-                .gcpServiceAccountJSON, .geminiSystemPrompt, .geminiVoice, .geminiModel,
+    for key in [Key.geminiAPIKey, .geminiSystemPrompt, .geminiVoice, .geminiModel,
                 .thinkingBudget, .responseLanguage, .mcpServerURL, .mcpAuthToken,
                 .webrtcSignalingURL, .speakerOutputEnabled, .videoStreamingEnabled,
                 .videoFrameRate, .videoJPEGQuality, .sendFramesToGemini, .sendAudioToGemini,
-                .proactiveNotificationsEnabled] {
+                .proactiveNotificationsEnabled, .streamingResolution, .streamingFrameRate,
+                .useHEVCCodec] {
       defaults.removeObject(forKey: key.rawValue)
     }
   }

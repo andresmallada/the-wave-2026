@@ -45,7 +45,6 @@
 		A1B2C3D42F0A000200000003 /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000003 /* AudioManager.swift */; };
 		A1B2C3D42F0A000200000004 /* GeminiSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000004 /* GeminiSessionViewModel.swift */; };
 		A1B2C3D42F0A000200000005 /* GeminiOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000005 /* GeminiOverlayView.swift */; };
-		A1B2C3D42F0A000200000010 /* VertexAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000010 /* VertexAuthManager.swift */; };
 		E66D30242E7DA71900470B48 /* MockDeviceKitButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */; };
 		E6A188482EB918740097D0E1 /* StreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6A188472EB918740097D0E1 /* StreamView.swift */; };
 		E6DA451D2E79A63100E3F688 /* MockDeviceCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6DA45182E79A63100E3F688 /* MockDeviceCardView.swift */; };
@@ -116,7 +115,6 @@
 		A1B2C3D42F0A000100000003 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		A1B2C3D42F0A000100000004 /* GeminiSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiSessionViewModel.swift; sourceTree = "<group>"; };
 		A1B2C3D42F0A000100000005 /* GeminiOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiOverlayView.swift; sourceTree = "<group>"; };
-		A1B2C3D42F0A000100000010 /* VertexAuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VertexAuthManager.swift; sourceTree = "<group>"; };
 		E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDeviceKitButton.swift; sourceTree = "<group>"; };
 		E699CC952E8150670052C240 /* CameraAccessTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CameraAccessTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E6A188472EB918740097D0E1 /* StreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamView.swift; sourceTree = "<group>"; };
@@ -275,7 +273,6 @@
 				A1B2C3D42F0A000100000001 /* GeminiConfig.swift */,
 				A1B2C3D42F0A000100000002 /* GeminiLiveService.swift */,
 				A1B2C3D42F0A000100000004 /* GeminiSessionViewModel.swift */,
-				A1B2C3D42F0A000100000010 /* VertexAuthManager.swift */,
 			);
 			path = Gemini;
 			sourceTree = "<group>";
@@ -437,7 +434,6 @@
 				A1B2C3D42F0A000200000002 /* GeminiLiveService.swift in Sources */,
 				A1B2C3D42F0A000200000003 /* AudioManager.swift in Sources */,
 				A1B2C3D42F0A000200000004 /* GeminiSessionViewModel.swift in Sources */,
-				A1B2C3D42F0A000200000010 /* VertexAuthManager.swift in Sources */,
 				9DD894B22F4047630090B9B9 /* SettingsManager.swift in Sources */,
 				9DD894B32F4047630090B9B9 /* SettingsView.swift in Sources */,
 				A1B2C3D42F0A000200000005 /* GeminiOverlayView.swift in Sources */,
@@ -730,7 +726,7 @@
 			repositoryURL = "https://github.com/facebook/meta-wearables-dat-ios";
 			requirement = {
 				kind = exactVersion;
-				version = 0.4.0;
+				version = 0.5.0;
 			};
 		};
 		9DD6CAFC2F3C62DA00ED7098 /* XCRemoteSwiftPackageReference "WebRTC" */ = {

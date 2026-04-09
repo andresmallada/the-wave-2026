@@ -42,7 +42,9 @@ class StreamSessionViewModel: ObservableObject {
   @Published var errorMessage: String = ""
   @Published var hasActiveDevice: Bool = false
   @Published var streamingMode: StreamingMode = .glasses
-  @Published var selectedResolution: StreamingResolution = .low
+  @Published var selectedResolution: StreamingResolution = .high
+  @Published var selectedFrameRate: Int = 24
+  @Published var useHEVCCodec: Bool = true
 
   var isStreaming: Bool {
     streamingStatus != .stopped
@@ -79,21 +81,31 @@ class StreamSessionViewModel: ObservableObject {
   private var deviceMonitorTask: Task<Void, Never>?
   private var iPhoneCameraManager: IPhoneCameraManager?
 
-  // CPU-based CIContext for rendering decoded pixel buffers in background
+  // GPU-accelerated CIContext for foreground HEVC frame rendering (fast, high quality)
+  private let gpuCIContext = CIContext(options: [.useSoftwareRenderer: false])
+  // CPU-based CIContext for background rendering (GPU suspended by iOS in background)
   private let cpuCIContext = CIContext(options: [.useSoftwareRenderer: true])
   // VideoDecoder for decompressing HEVC/H.264 frames in background
   private let videoDecoder = VideoDecoder()
   private var backgroundFrameCount = 0
   private var bgDiagLogged = false
+  private var fgFrameCount = 0
 
   init(wearables: WearablesInterface) {
     self.wearables = wearables
     // Let the SDK auto-select from available devices
     self.deviceSelector = AutoDeviceSelector(wearables: wearables)
+    let savedRes = Self.resolutionFromString(SettingsManager.shared.streamingResolution)
+    let savedFps = SettingsManager.shared.streamingFrameRate
+    let savedHEVC = SettingsManager.shared.useHEVCCodec
+    self.selectedResolution = savedRes
+    self.selectedFrameRate = savedFps
+    self.useHEVCCodec = savedHEVC
+    let codec: VideoCodec = savedHEVC ? .hvc1 : .raw
     let config = StreamSessionConfig(
-      videoCodec: VideoCodec.raw,
-      resolution: StreamingResolution.low,
-      frameRate: 24)
+      videoCodec: codec,
+      resolution: savedRes,
+      frameRate: UInt(savedFps))
     streamSession = StreamSession(streamSessionConfig: config, deviceSelector: deviceSelector)
 
     // Monitor device availability
@@ -116,14 +128,22 @@ class StreamSessionViewModel: ObservableObject {
         let height = CVPixelBufferGetHeight(pixelBuffer)
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         let rect = CGRect(x: 0, y: 0, width: width, height: height)
-        if let cgImage = self.cpuCIContext.createCGImage(ciImage, from: rect) {
+        let isInBg = UIApplication.shared.applicationState == .background
+        let ctx = isInBg ? self.cpuCIContext : self.gpuCIContext
+        if let cgImage = ctx.createCGImage(ciImage, from: rect) {
           let image = UIImage(cgImage: cgImage)
+          if !isInBg {
+            self.currentVideoFrame = image
+            if !self.hasReceivedFirstFrame { self.hasReceivedFirstFrame = true }
+            self.fgFrameCount += 1
+            if self.fgFrameCount <= 5 || self.fgFrameCount % 200 == 0 {
+              AppLog("Stream", "HEVC frame #\(self.fgFrameCount): \(width)x\(height) (requested: \(self.resolutionLabel), \(self.selectedFrameRate)fps)")
+            }
+          } else if self.backgroundFrameCount <= 5 || self.backgroundFrameCount % 120 == 0 {
+            AppLog("Stream", "BG frame #\(self.backgroundFrameCount) decoded (\(width)x\(height))")
+          }
           self.geminiSessionVM?.sendVideoFrameIfThrottled(image: image)
           self.webrtcSessionVM?.pushVideoFrame(image)
-          if self.backgroundFrameCount <= 5 || self.backgroundFrameCount % 120 == 0 {
-            NSLog("[Stream] Background frame #%d decoded and forwarded (%dx%d)",
-                  self.backgroundFrameCount, width, height)
-          }
         }
       }
     }
@@ -134,13 +154,55 @@ class StreamSessionViewModel: ObservableObject {
   func updateResolution(_ resolution: StreamingResolution) {
     guard !isStreaming else { return }
     selectedResolution = resolution
+    SettingsManager.shared.streamingResolution = Self.resolutionToString(resolution)
+    rebuildStreamSession()
+    AppLog("Stream", "Resolution changed to \(resolutionLabel)")
+  }
+
+  func updateFrameRate(_ fps: Int) {
+    guard !isStreaming else { return }
+    selectedFrameRate = fps
+    SettingsManager.shared.streamingFrameRate = fps
+    rebuildStreamSession()
+    AppLog("Stream", "Frame rate changed to \(fps) fps")
+  }
+
+  func updateCodec(_ hevc: Bool) {
+    guard !isStreaming else { return }
+    useHEVCCodec = hevc
+    SettingsManager.shared.useHEVCCodec = hevc
+    rebuildStreamSession()
+    AppLog("Stream", "Codec changed to \(hevc ? "HEVC (hvc1)" : "Raw")")
+  }
+
+  private var selectedCodec: VideoCodec {
+    useHEVCCodec ? .hvc1 : .raw
+  }
+
+  private func rebuildStreamSession() {
     let config = StreamSessionConfig(
-      videoCodec: VideoCodec.raw,
-      resolution: resolution,
-      frameRate: 24)
+      videoCodec: selectedCodec,
+      resolution: selectedResolution,
+      frameRate: UInt(selectedFrameRate))
     streamSession = StreamSession(streamSessionConfig: config, deviceSelector: deviceSelector)
     attachListeners()
-    NSLog("[Stream] Resolution changed to %@", resolutionLabel)
+  }
+
+  private static func resolutionFromString(_ str: String) -> StreamingResolution {
+    switch str {
+    case "low": return .low
+    case "medium": return .medium
+    default: return .high
+    }
+  }
+
+  private static func resolutionToString(_ res: StreamingResolution) -> String {
+    switch res {
+    case .low: return "low"
+    case .medium: return "medium"
+    case .high: return "high"
+    @unknown default: return "high"
+    }
   }
 
   private func attachListeners() {
@@ -164,12 +226,31 @@ class StreamSessionViewModel: ObservableObject {
           self.backgroundFrameCount = 0
           self.bgDiagLogged = false
           if let image = videoFrame.makeUIImage() {
+            // Raw codec: makeUIImage() works directly
+            self.fgFrameCount += 1
+            if self.fgFrameCount <= 5 || self.fgFrameCount % 200 == 0 {
+              AppLog("Stream", "Raw frame #\(self.fgFrameCount): \(Int(image.size.width))x\(Int(image.size.height)) (requested: \(self.resolutionLabel), \(self.selectedFrameRate)fps)")
+            }
             self.currentVideoFrame = image
             if !self.hasReceivedFirstFrame {
               self.hasReceivedFirstFrame = true
             }
             self.geminiSessionVM?.sendVideoFrameIfThrottled(image: image)
             self.webrtcSessionVM?.pushVideoFrame(image)
+          } else {
+            // HEVC codec: makeUIImage() returns nil, decode via VideoDecoder
+            let sampleBuffer = videoFrame.sampleBuffer
+            let hasCompressedData = CMSampleBufferGetDataBuffer(sampleBuffer) != nil
+            if hasCompressedData {
+              do {
+                try self.videoDecoder.decode(sampleBuffer)
+              } catch {
+                self.fgFrameCount += 1
+                if self.fgFrameCount <= 5 {
+                  AppLog("ERROR", "HEVC FG decode error: \(error)")
+                }
+              }
+            }
           }
         } else {
           // In background: makeUIImage() uses VideoToolbox GPU rendering which iOS suspends.
@@ -186,8 +267,7 @@ class StreamSessionViewModel: ObservableObject {
               try self.videoDecoder.decode(sampleBuffer)
             } catch {
               if self.backgroundFrameCount <= 5 || self.backgroundFrameCount % 120 == 0 {
-                NSLog("[Stream] Background frame #%d decode error: %@",
-                      self.backgroundFrameCount, String(describing: error))
+                AppLog("ERROR", "BG frame #\(self.backgroundFrameCount) decode error: \(error)")
               }
             }
           } else if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
@@ -301,7 +381,7 @@ class StreamSessionViewModel: ObservableObject {
     camera.start()
     iPhoneCameraManager = camera
     streamingStatus = .streaming
-    NSLog("[Stream] iPhone camera mode started")
+    AppLog("Stream", "iPhone camera mode started")
   }
 
   private func stopIPhoneSession() {
@@ -311,7 +391,7 @@ class StreamSessionViewModel: ObservableObject {
     hasReceivedFirstFrame = false
     streamingStatus = .stopped
     streamingMode = .glasses
-    NSLog("[Stream] iPhone camera mode stopped")
+    AppLog("Stream", "iPhone camera mode stopped")
   }
 
   func dismissError() {
@@ -352,12 +432,10 @@ class StreamSessionViewModel: ObservableObject {
       return "The operation timed out. Please try again."
     case .videoStreamingError:
       return "Video streaming failed. Please try again."
-    case .audioStreamingError:
-      return "Audio streaming failed. Please try again."
     case .permissionDenied:
       return "Camera permission denied. Please grant permission in Settings."
-    case .hingesClosed:
-      return "The hinges on the glasses were closed. Please open the hinges and try again."
+    case .thermalCritical:
+      return "Device overheating. Streaming paused to cool down."
     @unknown default:
       return "An unknown streaming error occurred."
     }

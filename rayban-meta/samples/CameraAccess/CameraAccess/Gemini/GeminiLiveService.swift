@@ -40,24 +40,8 @@ class GeminiLiveService: ObservableObject {
 
   func connect() async -> Bool {
     guard let url = GeminiConfig.websocketURL() else {
-      connectionState = .error(GeminiConfig.isVertexAI ? "Vertex AI not configured" : "No API key configured")
+      connectionState = .error("No API key configured")
       return false
-    }
-
-    // For Vertex AI, obtain an OAuth2 access token before connecting
-    var bearerToken: String?
-    if GeminiConfig.isVertexAI {
-      do {
-        let token = try await VertexAuthManager.shared.accessToken(
-          serviceAccountJSON: GeminiConfig.gcpServiceAccountJSON
-        )
-        bearerToken = token
-        AppLog("Gemini", "Vertex AI token obtained")
-      } catch {
-        connectionState = .error("Vertex AI auth failed: \(error.localizedDescription)")
-        AppLog("ERROR", "Vertex AI auth: \(error.localizedDescription)")
-        return false
-      }
     }
 
     AppLog("Gemini", "Connecting to: \(url.absoluteString.prefix(80))...")
@@ -68,7 +52,7 @@ class GeminiLiveService: ObservableObject {
         try? await Task.sleep(nanoseconds: 1_000_000_000)
       }
 
-      let success = await attemptConnect(url: url, bearerToken: bearerToken)
+      let success = await attemptConnect(url: url)
       if success { return true }
     }
 
@@ -76,7 +60,7 @@ class GeminiLiveService: ObservableObject {
     return false
   }
 
-  private func attemptConnect(url: URL, bearerToken: String? = nil) async -> Bool {
+  private func attemptConnect(url: URL) async -> Bool {
     // Clean up any previous attempt — nil callbacks first to prevent stale fires
     delegate.onOpen = nil
     delegate.onClose = nil
@@ -136,14 +120,7 @@ class GeminiLiveService: ObservableObject {
         }
       }
 
-      // Use URLRequest for Vertex AI to add Bearer token header
-      if let token = bearerToken {
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        self.webSocketTask = session.webSocketTask(with: request)
-      } else {
-        self.webSocketTask = session.webSocketTask(with: url)
-      }
+      self.webSocketTask = session.webSocketTask(with: url)
       self.webSocketTask?.resume()
 
       // Timeout after 15 seconds
@@ -194,10 +171,18 @@ class GeminiLiveService: ObservableObject {
     }
   }
 
+  private var videoFrameLogCount = 0
+
   func sendVideoFrame(image: UIImage) {
     guard connectionState == .ready else { return }
     sendQueue.async { [weak self] in
-      guard let jpegData = image.jpegData(compressionQuality: GeminiConfig.videoJPEGQuality) else { return }
+      guard let self else { return }
+      let quality = GeminiConfig.videoJPEGQuality
+      guard let jpegData = image.jpegData(compressionQuality: quality) else { return }
+      self.videoFrameLogCount += 1
+      if self.videoFrameLogCount <= 3 || self.videoFrameLogCount % 100 == 0 {
+        AppLog("Gemini", "Video frame #\(self.videoFrameLogCount): \(Int(image.size.width))x\(Int(image.size.height)) JPEG q=\(Int(quality * 100))% size=\(jpegData.count / 1024)KB")
+      }
       let base64 = jpegData.base64EncodedString()
       let json: [String: Any] = [
         "realtimeInput": [
@@ -207,7 +192,7 @@ class GeminiLiveService: ObservableObject {
           ]
         ]
       ]
-      self?.sendJSON(json)
+      self.sendJSON(json)
     }
   }
 
@@ -244,7 +229,7 @@ class GeminiLiveService: ObservableObject {
 
   private func sendSetupMessage() {
     let voice = GeminiConfig.voice
-    let model = GeminiConfig.modelForSetup
+    let model = GeminiConfig.model
     let is31 = GeminiConfig.isModel31
     let lang = GeminiConfig.responseLanguage
 

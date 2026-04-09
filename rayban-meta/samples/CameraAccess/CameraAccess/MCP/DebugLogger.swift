@@ -157,6 +157,8 @@ struct DebugConsoleView: View {
     case "Session": return .green
     case "WebRTC": return .purple
     case "Audio": return .mint
+    case "Stream": return .blue
+    case "Latency": return .pink
     default: return .white
     }
   }
