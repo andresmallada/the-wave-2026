@@ -40,8 +40,24 @@ class GeminiLiveService: ObservableObject {
 
   func connect() async -> Bool {
     guard let url = GeminiConfig.websocketURL() else {
-      connectionState = .error("No API key configured")
+      connectionState = .error(GeminiConfig.isVertexAI ? "Vertex AI not configured" : "No API key configured")
       return false
+    }
+
+    // For Vertex AI, obtain an OAuth2 access token before connecting
+    var bearerToken: String?
+    if GeminiConfig.isVertexAI {
+      do {
+        let token = try await VertexAuthManager.shared.accessToken(
+          serviceAccountJSON: GeminiConfig.gcpServiceAccountJSON
+        )
+        bearerToken = token
+        AppLog("Gemini", "Vertex AI token obtained")
+      } catch {
+        connectionState = .error("Vertex AI auth failed: \(error.localizedDescription)")
+        AppLog("ERROR", "Vertex AI auth: \(error.localizedDescription)")
+        return false
+      }
     }
 
     AppLog("Gemini", "Connecting to: \(url.absoluteString.prefix(80))...")
@@ -52,7 +68,7 @@ class GeminiLiveService: ObservableObject {
         try? await Task.sleep(nanoseconds: 1_000_000_000)
       }
 
-      let success = await attemptConnect(url: url)
+      let success = await attemptConnect(url: url, bearerToken: bearerToken)
       if success { return true }
     }
 
@@ -60,7 +76,7 @@ class GeminiLiveService: ObservableObject {
     return false
   }
 
-  private func attemptConnect(url: URL) async -> Bool {
+  private func attemptConnect(url: URL, bearerToken: String? = nil) async -> Bool {
     // Clean up any previous attempt — nil callbacks first to prevent stale fires
     delegate.onOpen = nil
     delegate.onClose = nil
@@ -120,7 +136,14 @@ class GeminiLiveService: ObservableObject {
         }
       }
 
-      self.webSocketTask = session.webSocketTask(with: url)
+      // Use URLRequest for Vertex AI to add Bearer token header
+      if let token = bearerToken {
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        self.webSocketTask = session.webSocketTask(with: request)
+      } else {
+        self.webSocketTask = session.webSocketTask(with: url)
+      }
       self.webSocketTask?.resume()
 
       // Timeout after 15 seconds
@@ -221,7 +244,7 @@ class GeminiLiveService: ObservableObject {
 
   private func sendSetupMessage() {
     let voice = GeminiConfig.voice
-    let model = GeminiConfig.model
+    let model = GeminiConfig.modelForSetup
     let is31 = GeminiConfig.isModel31
     let lang = GeminiConfig.responseLanguage
 

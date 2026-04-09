@@ -7,6 +7,10 @@ final class SettingsManager {
 
   private enum Key: String {
     case geminiAPIKey
+    case apiBackend
+    case gcpProjectId
+    case gcpRegion
+    case gcpServiceAccountJSON
     case mcpServerURL
     case mcpAuthToken
     case geminiSystemPrompt
@@ -26,11 +30,54 @@ final class SettingsManager {
 
   private init() {}
 
+  // MARK: - API Backend
+
+  /// "aistudio" | "vertexai"
+  var apiBackend: String {
+    get { defaults.string(forKey: Key.apiBackend.rawValue) ?? "aistudio" }
+    set { defaults.set(newValue, forKey: Key.apiBackend.rawValue) }
+  }
+
+  var isVertexAI: Bool { apiBackend == "vertexai" }
+
+  static let apiBackendIDs: [String] = ["aistudio", "vertexai"]
+
+  static func apiBackendLabel(for id: String) -> String {
+    switch id {
+    case "aistudio": return "AI Studio"
+    case "vertexai": return "Vertex AI (GCP)"
+    default: return id
+    }
+  }
+
   // MARK: - Gemini
 
   var geminiAPIKey: String {
     get { defaults.string(forKey: Key.geminiAPIKey.rawValue) ?? Secrets.geminiAPIKey }
     set { defaults.set(newValue, forKey: Key.geminiAPIKey.rawValue) }
+  }
+
+  // MARK: - Google Cloud (Vertex AI)
+
+  var gcpProjectId: String {
+    get { defaults.string(forKey: Key.gcpProjectId.rawValue) ?? "" }
+    set { defaults.set(newValue, forKey: Key.gcpProjectId.rawValue) }
+  }
+
+  var gcpRegion: String {
+    get { defaults.string(forKey: Key.gcpRegion.rawValue) ?? "us-central1" }
+    set { defaults.set(newValue, forKey: Key.gcpRegion.rawValue) }
+  }
+
+  static let gcpRegions = [
+    "us-central1", "us-east1", "us-west1",
+    "europe-west1", "europe-west4",
+    "asia-northeast1", "asia-southeast1"
+  ]
+
+  var gcpServiceAccountJSON: String {
+    get { defaults.string(forKey: Key.gcpServiceAccountJSON.rawValue) ?? "" }
+    set { defaults.set(newValue, forKey: Key.gcpServiceAccountJSON.rawValue) }
   }
 
   var geminiSystemPrompt: String {
@@ -188,7 +235,8 @@ final class SettingsManager {
   // MARK: - Reset
 
   func resetAll() {
-    for key in [Key.geminiAPIKey, .geminiSystemPrompt, .geminiVoice, .geminiModel,
+    for key in [Key.geminiAPIKey, .apiBackend, .gcpProjectId, .gcpRegion,
+                .gcpServiceAccountJSON, .geminiSystemPrompt, .geminiVoice, .geminiModel,
                 .thinkingBudget, .responseLanguage, .mcpServerURL, .mcpAuthToken,
                 .webrtcSignalingURL, .speakerOutputEnabled, .videoStreamingEnabled,
                 .videoFrameRate, .videoJPEGQuality, .sendFramesToGemini, .sendAudioToGemini,

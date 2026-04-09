@@ -4,7 +4,11 @@ struct SettingsView: View {
   @Environment(\.dismiss) private var dismiss
   private let settings = SettingsManager.shared
 
+  @State private var apiBackend: String = "aistudio"
   @State private var geminiAPIKey: String = ""
+  @State private var gcpProjectId: String = ""
+  @State private var gcpRegion: String = "us-central1"
+  @State private var gcpServiceAccountJSON: String = ""
   @State private var mcpServerURL: String = ""
   @State private var mcpAuthToken: String = ""
   @State private var geminiSystemPrompt: String = ""
@@ -25,15 +29,49 @@ struct SettingsView: View {
   var body: some View {
     NavigationView {
       Form {
-        Section(header: Text("Gemini API")) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("API Key")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("Enter Gemini API key", text: $geminiAPIKey)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .font(.system(.body, design: .monospaced))
+        Section(header: Text("API Backend"), footer: Text(apiBackend == "vertexai" ? "Vertex AI uses a GCP service account for auth. Paste the full JSON key content below." : "AI Studio uses a simple API key from aistudio.google.com.")) {
+          Picker("Backend", selection: $apiBackend) {
+            ForEach(SettingsManager.apiBackendIDs, id: \.self) { id in
+              Text(SettingsManager.apiBackendLabel(for: id)).tag(id)
+            }
+          }
+          .pickerStyle(.segmented)
+
+          if apiBackend == "vertexai" {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("GCP Project ID")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              TextField("my-project-123456", text: $gcpProjectId)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .font(.system(.body, design: .monospaced))
+            }
+
+            Picker("Region", selection: $gcpRegion) {
+              ForEach(SettingsManager.gcpRegions, id: \.self) { region in
+                Text(region).tag(region)
+              }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Service Account JSON")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              TextEditor(text: $gcpServiceAccountJSON)
+                .font(.system(.caption2, design: .monospaced))
+                .frame(minHeight: 120)
+            }
+          } else {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("API Key")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              TextField("Enter Gemini API key", text: $geminiAPIKey)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .font(.system(.body, design: .monospaced))
+            }
           }
         }
 
@@ -205,7 +243,11 @@ struct SettingsView: View {
   }
 
   private func loadCurrentValues() {
+    apiBackend = settings.apiBackend
     geminiAPIKey = settings.geminiAPIKey
+    gcpProjectId = settings.gcpProjectId
+    gcpRegion = settings.gcpRegion
+    gcpServiceAccountJSON = settings.gcpServiceAccountJSON
     geminiSystemPrompt = settings.geminiSystemPrompt
     geminiVoice = settings.geminiVoice
     geminiModel = settings.geminiModel
@@ -223,7 +265,11 @@ struct SettingsView: View {
   }
 
   private func save() {
+    settings.apiBackend = apiBackend
     settings.geminiAPIKey = geminiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    settings.gcpProjectId = gcpProjectId.trimmingCharacters(in: .whitespacesAndNewlines)
+    settings.gcpRegion = gcpRegion
+    settings.gcpServiceAccountJSON = gcpServiceAccountJSON.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.geminiSystemPrompt = geminiSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.geminiVoice = geminiVoice
     settings.geminiModel = geminiModel

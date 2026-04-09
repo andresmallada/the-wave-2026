@@ -1,8 +1,13 @@
 import Foundation
 
 enum GeminiConfig {
-  static let websocketBaseURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+  // AI Studio endpoint
+  static let aiStudioBaseURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+  // Vertex AI endpoint (region is interpolated at runtime)
+  static let vertexBaseURLTemplate = "wss://{REGION}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
+
   static let defaultModel = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+  static var isVertexAI: Bool { SettingsManager.shared.isVertexAI }
   static var model: String { SettingsManager.shared.geminiModel }
   static var voice: String { SettingsManager.shared.geminiVoice }
   static var thinkingBudget: Int { SettingsManager.shared.thinkingBudget }
@@ -53,12 +58,43 @@ enum GeminiConfig {
   static var mcpServerURL: String { SettingsManager.shared.mcpServerURL }
   static var mcpAuthToken: String { SettingsManager.shared.mcpAuthToken }
 
+  // MARK: - Vertex AI
+
+  static var gcpProjectId: String { SettingsManager.shared.gcpProjectId }
+  static var gcpRegion: String { SettingsManager.shared.gcpRegion }
+  static var gcpServiceAccountJSON: String { SettingsManager.shared.gcpServiceAccountJSON }
+
+  /// Returns the WebSocket URL for the current backend.
+  /// For AI Studio: includes ?key= query param.
+  /// For Vertex AI: plain URL (auth via Bearer header at connection time).
   static func websocketURL() -> URL? {
-    guard apiKey != "YOUR_GEMINI_API_KEY" && !apiKey.isEmpty else { return nil }
-    return URL(string: "\(websocketBaseURL)?key=\(apiKey)")
+    if isVertexAI {
+      let region = gcpRegion
+      guard !gcpProjectId.isEmpty, !gcpServiceAccountJSON.isEmpty else { return nil }
+      let urlStr = vertexBaseURLTemplate.replacingOccurrences(of: "{REGION}", with: region)
+      return URL(string: urlStr)
+    } else {
+      guard apiKey != "YOUR_GEMINI_API_KEY" && !apiKey.isEmpty else { return nil }
+      return URL(string: "\(aiStudioBaseURL)?key=\(apiKey)")
+    }
+  }
+
+  /// Returns the model identifier in the correct format for the active backend.
+  /// AI Studio: "models/gemini-2.5-flash-..."
+  /// Vertex AI: "projects/{P}/locations/{R}/publishers/google/models/gemini-2.5-flash-..."
+  static var modelForSetup: String {
+    let m = model
+    if isVertexAI {
+      let baseName = m.hasPrefix("models/") ? String(m.dropFirst(7)) : m
+      return "projects/\(gcpProjectId)/locations/\(gcpRegion)/publishers/google/models/\(baseName)"
+    }
+    return m
   }
 
   static var isConfigured: Bool {
+    if isVertexAI {
+      return !gcpProjectId.isEmpty && !gcpServiceAccountJSON.isEmpty
+    }
     return apiKey != "YOUR_GEMINI_API_KEY" && !apiKey.isEmpty
   }
 
