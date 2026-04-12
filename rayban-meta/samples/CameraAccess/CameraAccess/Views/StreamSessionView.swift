@@ -42,6 +42,10 @@ struct StreamSessionView: View {
       viewModel.geminiSessionVM = geminiVM
       viewModel.webrtcSessionVM = webrtcVM
       geminiVM.streamingMode = viewModel.streamingMode
+      // Wire photo capture handler for scan_document tool
+      geminiVM.photoCaptureHandler = { [weak viewModel] in
+        await viewModel?.capturePhotoForAnalysis()
+      }
     }
     .onChange(of: viewModel.streamingMode) { newMode in
       geminiVM.streamingMode = newMode

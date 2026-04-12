@@ -32,8 +32,13 @@ class GeminiLiveService: ObservableObject {
   private var connectContinuation: CheckedContinuation<Bool, Never>?
   private let delegate = WebSocketDelegate()
   private var urlSession: URLSession?
-  private let sendQueue = DispatchQueue(label: "gemini.send", qos: .userInitiated)
+  private let audioSendQueue = DispatchQueue(label: "gemini.audio", qos: .userInteractive)
+  private let videoSendQueue = DispatchQueue(label: "gemini.video", qos: .utility)
+  private let videoSendSemaphore = DispatchSemaphore(value: 1)  // real backpressure
+  private var videoFramesDropped = 0
+  private static let maxStreamingJPEGQuality: CGFloat = 0.80  // cap for WS bandwidth
   private let maxRetries = 2
+  private var lastResumptionToken: String?
 
   /// Tool declarations to register with Gemini. Set before calling connect().
   var toolDeclarations: [[String: Any]] = []
@@ -44,6 +49,9 @@ class GeminiLiveService: ObservableObject {
       return false
     }
 
+    sessionId += 1
+    let sid = sessionId
+    AppLog("Session", "Starting session #\(sid)")
     AppLog("Gemini", "Connecting to: \(url.absoluteString.prefix(80))...")
 
     for attempt in 0...maxRetries {
@@ -138,26 +146,64 @@ class GeminiLiveService: ObservableObject {
     return result
   }
 
+  /// Unique ID for this session, incremented on each connect. Used to detect stale callbacks.
+  private(set) var sessionId: Int = 0
+
   func disconnect() {
+    let sid = sessionId
+    AppLog("Session", "Disconnecting session #\(sid)")
+
+    // Cancel receive loop
     receiveTask?.cancel()
     receiveTask = nil
+
+    // Close WebSocket
     webSocketTask?.cancel(with: .normalClosure, reason: nil)
     webSocketTask = nil
+
+    // Nil ALL callbacks to prevent stale fires
     delegate.onOpen = nil
     delegate.onClose = nil
     delegate.onError = nil
+    onAudioReceived = nil
+    onTurnComplete = nil
+    onInterrupted = nil
+    onDisconnected = nil
+    onInputTranscription = nil
+    onOutputTranscription = nil
     onToolCall = nil
     onToolCallCancellation = nil
+
+    // Invalidate URL session
     urlSession?.invalidateAndCancel()
     urlSession = nil
+
+    // Reset connection state
     connectionState = .disconnected
     isModelSpeaking = false
     resolveConnect(success: false)
+
+    // Reset counters and backpressure
+    videoFrameLogCount = 0
+    videoFramesDropped = 0
+    wsSendErrorCount = 0
+    lastUserSpeechEnd = nil
+    responseLatencyLogged = false
+    lastResumptionToken = nil
+
+    // Drain video semaphore to ensure it's available for next session
+    // (if previous send didn't complete, semaphore is stuck at 0)
+    videoSendSemaphore.signal()  // ensure value >= 1
+    // Immediately re-acquire to bring it back to 1 if it was already 1
+    // (signal from 1→2, wait brings it 2→1)
+    _ = videoSendSemaphore.wait(timeout: .now())
+
+    AppLog("Session", "Session #\(sid) fully disconnected and reset")
   }
 
   func sendAudio(data: Data) {
     guard connectionState == .ready else { return }
-    sendQueue.async { [weak self] in
+    audioSendQueue.async { [weak self] in
       let base64 = data.base64EncodedString()
       let json: [String: Any] = [
         "realtimeInput": [
@@ -175,13 +221,35 @@ class GeminiLiveService: ObservableObject {
 
   func sendVideoFrame(image: UIImage) {
     guard connectionState == .ready else { return }
-    sendQueue.async { [weak self] in
-      guard let self else { return }
-      let quality = GeminiConfig.videoJPEGQuality
-      guard let jpegData = image.jpegData(compressionQuality: quality) else { return }
+    // Real backpressure: semaphore blocks until previous WS send completes
+    guard videoSendSemaphore.wait(timeout: .now()) == .success else {
+      videoFramesDropped += 1
+      if videoFramesDropped == 1 || videoFramesDropped % 50 == 0 {
+        AppLog("Stream", "Video backpressure: \(videoFramesDropped) frames dropped (WS busy)")
+      }
+      return
+    }
+    videoSendQueue.async { [weak self] in
+      guard let self else {
+        self?.videoSendSemaphore.signal()
+        return
+      }
+      guard self.connectionState == .ready else {
+        self.videoSendSemaphore.signal()
+        return
+      }
+      // Downscale to max 768px on longest side for Gemini
+      let scaled = Self.downscaleForGemini(image)
+      // Cap JPEG quality for streaming (100% = 1.7MB kills the WebSocket)
+      let configQuality = GeminiConfig.videoJPEGQuality
+      let quality = min(configQuality, Self.maxStreamingJPEGQuality)
+      guard let jpegData = scaled.jpegData(compressionQuality: quality) else {
+        self.videoSendSemaphore.signal()
+        return
+      }
       self.videoFrameLogCount += 1
       if self.videoFrameLogCount <= 3 || self.videoFrameLogCount % 100 == 0 {
-        AppLog("Gemini", "Video frame #\(self.videoFrameLogCount): \(Int(image.size.width))x\(Int(image.size.height)) JPEG q=\(Int(quality * 100))% size=\(jpegData.count / 1024)KB")
+        AppLog("Gemini", "Video frame #\(self.videoFrameLogCount): \(Int(scaled.size.width))x\(Int(scaled.size.height)) JPEG q=\(Int(quality * 100))% size=\(jpegData.count / 1024)KB (dropped:\(self.videoFramesDropped))")
       }
       let base64 = jpegData.base64EncodedString()
       let json: [String: Any] = [
@@ -192,13 +260,31 @@ class GeminiLiveService: ObservableObject {
           ]
         ]
       ]
-      self.sendJSON(json)
+      // Signal semaphore only after WebSocket actually accepts the message
+      self.sendJSONWithCompletion(json) {
+        self.videoSendSemaphore.signal()
+      }
+    }
+  }
+
+  /// Downscale image so longest side is at most 768px (Gemini optimal)
+  private static func downscaleForGemini(_ image: UIImage) -> UIImage {
+    let maxDim: CGFloat = 768
+    let w = image.size.width
+    let h = image.size.height
+    let longest = max(w, h)
+    guard longest > maxDim else { return image }
+    let scale = maxDim / longest
+    let newSize = CGSize(width: w * scale, height: h * scale)
+    let renderer = UIGraphicsImageRenderer(size: newSize)
+    return renderer.image { _ in
+      image.draw(in: CGRect(origin: .zero, size: newSize))
     }
   }
 
   func sendToolResponse(_ response: [String: Any]) {
     AppLog("Gemini", "Sending toolResponse back to model")
-    sendQueue.async { [weak self] in
+    audioSendQueue.async { [weak self] in
       self?.sendJSON(response)
       AppLog("Gemini", "toolResponse sent successfully")
     }
@@ -206,7 +292,7 @@ class GeminiLiveService: ObservableObject {
 
   func sendTextMessage(_ text: String) {
     guard connectionState == .ready else { return }
-    sendQueue.async { [weak self] in
+    audioSendQueue.async { [weak self] in
       let msg: [String: Any] = [
         "clientContent": [
           "turns": [
@@ -271,11 +357,13 @@ class GeminiLiveService: ObservableObject {
             ["text": systemText]
           ]
         ],
-        "tools": toolDeclarations.isEmpty ? [] as [[String: Any]] : [
-          [
-            "functionDeclarations": toolDeclarations
-          ]
-        ],
+        "tools": {
+          var t: [[String: Any]] = [["google_search": [:] as [String: Any]]]
+          if !toolDeclarations.isEmpty {
+            t.append(["functionDeclarations": toolDeclarations])
+          }
+          return t
+        }(),
         "realtimeInputConfig": [
           "automaticActivityDetection": [
             "disabled": false,
@@ -287,6 +375,9 @@ class GeminiLiveService: ObservableObject {
           "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
           "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
         ],
+        "sessionResumption": lastResumptionToken != nil
+          ? ["handle": lastResumptionToken!] as [String: Any]
+          : [:] as [String: Any],
         "contextWindowCompression": [
           "slidingWindow": [
             "targetTokens": 80000
@@ -299,15 +390,32 @@ class GeminiLiveService: ObservableObject {
     sendJSON(setup)
   }
 
+  private var wsSendErrorCount = 0
+
   private func sendJSON(_ json: [String: Any]) {
+    sendJSONWithCompletion(json, completion: nil)
+  }
+
+  private func sendJSONWithCompletion(_ json: [String: Any], completion: (() -> Void)?) {
     guard let data = try? JSONSerialization.data(withJSONObject: json),
           let string = String(data: data, encoding: .utf8) else {
+      completion?()
       return
     }
-    webSocketTask?.send(.string(string)) { error in
+    guard let ws = webSocketTask else {
+      completion?()
+      return
+    }
+    ws.send(.string(string)) { [weak self] error in
       if let error {
-        AppLog("ERROR", "WebSocket send failed: \(error.localizedDescription)")
+        let count = (self?.wsSendErrorCount ?? 0) + 1
+        self?.wsSendErrorCount = count
+        // Rate-limit error logging (not 10x per second)
+        if count <= 3 || count % 50 == 0 {
+          AppLog("ERROR", "WebSocket send failed (#\(count)): \(error.localizedDescription)")
+        }
       }
+      completion?()
     }
   }
 
@@ -366,9 +474,27 @@ class GeminiLiveService: ObservableObject {
     if let goAway = json["goAway"] as? [String: Any] {
       let timeLeft = goAway["timeLeft"] as? [String: Any]
       let seconds = timeLeft?["seconds"] as? Int ?? 0
+      AppLog("Session", "GoAway received — server closing in \(seconds)s")
       connectionState = .disconnected
       isModelSpeaking = false
       onDisconnected?("Server closing (time left: \(seconds)s)")
+      return
+    }
+
+    // Session resumption token — store for reconnect
+    if let resumption = json["sessionResumptionUpdate"] as? [String: Any] {
+      if let token = resumption["newHandle"] as? String, !token.isEmpty {
+        lastResumptionToken = token
+        let resumable = resumption["resumable"] as? Bool ?? false
+        AppLog("Session", "Resumption token updated (resumable: \(resumable))")
+      }
+      return
+    }
+
+    // Generation complete — model finished producing response
+    if let serverContent = json["serverContent"] as? [String: Any],
+       let genComplete = serverContent["generationComplete"] as? Bool, genComplete {
+      AppLog("Session", "Generation complete")
       return
     }
 
@@ -407,13 +533,13 @@ class GeminiLiveService: ObservableObject {
               // Log latency: time from end of user speech to first audio response
               if let speechEnd = lastUserSpeechEnd, !responseLatencyLogged {
                 let latency = Date().timeIntervalSince(speechEnd)
-                NSLog("[Latency] %.0fms (user speech end -> first audio)", latency * 1000)
+                AppLog("Latency", String(format: "%.0fms (user speech end -> first audio)", latency * 1000))
                 responseLatencyLogged = true
               }
             }
             onAudioReceived?(audioData)
           } else if let text = part["text"] as? String {
-            NSLog("[Gemini] %@", text)
+            AppLog("Gemini", text)
           }
         }
       }
@@ -426,14 +552,14 @@ class GeminiLiveService: ObservableObject {
 
       if let inputTranscription = serverContent["inputTranscription"] as? [String: Any],
          let text = inputTranscription["text"] as? String, !text.isEmpty {
-        NSLog("[Gemini] You: %@", text)
+        AppLog("Gemini", "You: \(text)")
         lastUserSpeechEnd = Date()
         responseLatencyLogged = false
         onInputTranscription?(text)
       }
       if let outputTranscription = serverContent["outputTranscription"] as? [String: Any],
          let text = outputTranscription["text"] as? String, !text.isEmpty {
-        NSLog("[Gemini] AI: %@", text)
+        AppLog("Gemini", "AI: \(text)")
         onOutputTranscription?(text)
       }
     }

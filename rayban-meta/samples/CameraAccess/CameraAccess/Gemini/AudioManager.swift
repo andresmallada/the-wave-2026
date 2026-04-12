@@ -220,14 +220,11 @@ class AudioManager {
     audioEngine.stop()
     audioEngine.detach(playerNode)
     isCapturing = false
-    // Flush any remaining accumulated audio
+    // Discard any remaining accumulated audio (stale data from closing session)
     sendQueue.async {
-      if !self.accumulatedData.isEmpty {
-        let chunk = self.accumulatedData
-        self.accumulatedData = Data()
-        self.onAudioCaptured?(chunk)
-      }
+      self.accumulatedData = Data()
     }
+    onAudioCaptured = nil
     removeObservers()
   }
 

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4F5518A42F8ABFB2004957BD /* GeminiVisionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5518A32F8ABFB2004957BD /* GeminiVisionService.swift */; };
 		8F2D23802E856711002D0588 /* DebugMenuViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F2D237F2E856711002D0588 /* DebugMenuViewModel.swift */; };
 		8F8F00782E8ACB4600A4BDAF /* WearablesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F8F00772E8ACB4500A4BDAF /* WearablesViewModel.swift */; };
 		8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B792E6F0A9800F56AB1 /* CameraAccessApp.swift */; };
@@ -78,6 +79,7 @@
 
 /* Begin PBXFileReference section */
 		3A3A3A3A3A3A3A3A3A3A3A3A /* CameraAccess.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CameraAccess.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4F5518A32F8ABFB2004957BD /* GeminiVisionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiVisionService.swift; sourceTree = "<group>"; };
 		8F2D237F2E856711002D0588 /* DebugMenuViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugMenuViewModel.swift; sourceTree = "<group>"; };
 		8F8F00772E8ACB4500A4BDAF /* WearablesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearablesViewModel.swift; sourceTree = "<group>"; };
 		8FD96B6F2E6F0A9800F56AB1 /* StreamSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSessionViewModel.swift; sourceTree = "<group>"; };
@@ -272,6 +274,7 @@
 				A1B2C3D42F0A000100000003 /* AudioManager.swift */,
 				A1B2C3D42F0A000100000001 /* GeminiConfig.swift */,
 				A1B2C3D42F0A000100000002 /* GeminiLiveService.swift */,
+				4F5518A32F8ABFB2004957BD /* GeminiVisionService.swift */,
 				A1B2C3D42F0A000100000004 /* GeminiSessionViewModel.swift */,
 			);
 			path = Gemini;
@@ -414,6 +417,7 @@
 				8FD96B872E6F0A9800F56AB1 /* StreamSessionViewModel.swift in Sources */,
 				9DD6CC002F4A000000ED7098 /* VideoDecoder.swift in Sources */,
 				8FD96B882E6F0A9800F56AB1 /* StreamSessionView.swift in Sources */,
+				4F5518A42F8ABFB2004957BD /* GeminiVisionService.swift in Sources */,
 				8FFD60602E84A2F70035E446 /* MainAppView.swift in Sources */,
 				9DD6CB052F3C637D00ED7098 /* WebRTCSessionViewModel.swift in Sources */,
 				9DD6CB062F3C637D00ED7098 /* WebRTCConfig.swift in Sources */,

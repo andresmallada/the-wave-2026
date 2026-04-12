@@ -1,13 +1,8 @@
 import Foundation
 
 enum GeminiConfig {
-  // AI Studio endpoint
-  static let aiStudioBaseURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-  // Vertex AI endpoint (region is interpolated at runtime)
-  static let vertexBaseURLTemplate = "wss://{REGION}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
-
+  static let websocketBaseURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
   static let defaultModel = "models/gemini-2.5-flash-native-audio-preview-12-2025"
-  static var isVertexAI: Bool { SettingsManager.shared.isVertexAI }
   static var model: String { SettingsManager.shared.geminiModel }
   static var voice: String { SettingsManager.shared.geminiVoice }
   static var thinkingBudget: Int { SettingsManager.shared.thinkingBudget }
@@ -28,27 +23,36 @@ enum GeminiConfig {
   static let defaultSystemInstruction = """
     You are an AI assistant for someone wearing Meta Ray-Ban smart glasses. You can see through their camera and have a voice conversation. Keep responses concise and natural.
 
-    CRITICAL: You have NO memory, NO storage, and NO ability to take actions on your own. You cannot remember things, keep lists, set reminders, search the web, send messages, or do anything persistent. You are ONLY a voice interface.
+    CRITICAL: You have NO memory, NO storage, and NO ability to take actions on your own. You cannot remember things, keep lists, set reminders, send messages, or do anything persistent. You are ONLY a voice interface.
 
-    You have exactly ONE tool: execute. This connects you to a powerful personal assistant that can do anything -- send messages, search the web, manage lists, set reminders, create notes, research topics, control smart home devices, interact with apps, and much more.
+    GOOGLE SEARCH: You have built-in Google Search capability. Use it automatically whenever you need current information, facts, news, or details about people, companies, places, or events. You don't need to announce that you're searching -- just answer with up-to-date information.
 
-    ALWAYS use execute when the user asks you to:
+    You have tools to interact with external services (CRM, messaging, etc.) and a special scan_document tool.
+
+    ALWAYS use the available tools when the user asks you to:
     - Send a message to someone (any platform: WhatsApp, Telegram, iMessage, Slack, etc.)
     - Search or look up anything (web, local info, facts, news)
-    - Add, create, or modify anything (shopping lists, reminders, notes, todos, events)
+    - Add, create, or modify anything (shopping lists, reminders, notes, todos, events, contacts)
     - Research, analyze, or draft anything
     - Control or interact with apps, devices, or services
     - Remember or store any information for later
 
-    Be detailed in your task description. Include all relevant context: names, content, platforms, quantities, etc. The assistant works better with complete information.
+    DOCUMENT SCANNING (scan_document tool):
+    - Use scan_document whenever the user asks you to read, scan, or extract info from a document (business card, invoice, receipt, ID, etc.)
+    - Also use it when you cannot read text clearly from the video stream
+    - This tool captures a HIGH-RESOLUTION photo and uses advanced OCR -- much better than the live video
+    - IMPORTANT: After scanning, ALWAYS read the extracted data back to the user for confirmation BEFORE saving to any system (CRM, contacts, etc.)
+    - Example flow: User says "scan this business card and add it to CRM" → You say "Let me scan that" → call scan_document → read back "I found: Juan García, CEO at TechCorp, email juan@techcorp.com. Shall I save this to the CRM?" → user confirms → call crm_create_contact
 
-    NEVER pretend to do these things yourself.
+    Be detailed in your task descriptions. Include all relevant context: names, content, platforms, quantities, etc.
 
-    IMPORTANT: Before calling execute, ALWAYS speak a brief acknowledgment first. For example:
-    - "Sure, let me add that to your shopping list." then call execute.
-    - "Got it, searching for that now." then call execute.
-    - "On it, sending that message." then call execute.
-    Never call execute silently -- the user needs verbal confirmation that you heard them and are working on it. The tool may take several seconds to complete, so the acknowledgment lets them know something is happening.
+    NEVER pretend to do things yourself that require tools.
+
+    IMPORTANT: Before calling any tool, ALWAYS speak a brief acknowledgment first. For example:
+    - "Sure, let me scan that for you." then call scan_document.
+    - "Got it, searching for that now." then call the appropriate tool.
+    - "On it, saving that contact." then call crm_create_contact.
+    Never call tools silently -- the user needs verbal confirmation that you heard them and are working on it.
 
     For messages, confirm recipient and content before delegating unless clearly urgent.
     """
@@ -58,43 +62,12 @@ enum GeminiConfig {
   static var mcpServerURL: String { SettingsManager.shared.mcpServerURL }
   static var mcpAuthToken: String { SettingsManager.shared.mcpAuthToken }
 
-  // MARK: - Vertex AI
-
-  static var gcpProjectId: String { SettingsManager.shared.gcpProjectId }
-  static var gcpRegion: String { SettingsManager.shared.gcpRegion }
-  static var gcpServiceAccountJSON: String { SettingsManager.shared.gcpServiceAccountJSON }
-
-  /// Returns the WebSocket URL for the current backend.
-  /// For AI Studio: includes ?key= query param.
-  /// For Vertex AI: plain URL (auth via Bearer header at connection time).
   static func websocketURL() -> URL? {
-    if isVertexAI {
-      let region = gcpRegion
-      guard !gcpProjectId.isEmpty, !gcpServiceAccountJSON.isEmpty else { return nil }
-      let urlStr = vertexBaseURLTemplate.replacingOccurrences(of: "{REGION}", with: region)
-      return URL(string: urlStr)
-    } else {
-      guard apiKey != "YOUR_GEMINI_API_KEY" && !apiKey.isEmpty else { return nil }
-      return URL(string: "\(aiStudioBaseURL)?key=\(apiKey)")
-    }
-  }
-
-  /// Returns the model identifier in the correct format for the active backend.
-  /// AI Studio: "models/gemini-2.5-flash-..."
-  /// Vertex AI: "projects/{P}/locations/{R}/publishers/google/models/gemini-2.5-flash-..."
-  static var modelForSetup: String {
-    let m = model
-    if isVertexAI {
-      let baseName = m.hasPrefix("models/") ? String(m.dropFirst(7)) : m
-      return "projects/\(gcpProjectId)/locations/\(gcpRegion)/publishers/google/models/\(baseName)"
-    }
-    return m
+    guard apiKey != "YOUR_GEMINI_API_KEY" && !apiKey.isEmpty else { return nil }
+    return URL(string: "\(websocketBaseURL)?key=\(apiKey)")
   }
 
   static var isConfigured: Bool {
-    if isVertexAI {
-      return !gcpProjectId.isEmpty && !gcpServiceAccountJSON.isEmpty
-    }
     return apiKey != "YOUR_GEMINI_API_KEY" && !apiKey.isEmpty
   }
 

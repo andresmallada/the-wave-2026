@@ -21,6 +21,30 @@ class GeminiSessionViewModel: ObservableObject {
 
   var streamingMode: StreamingMode = .glasses
 
+  /// Handler to capture a high-res photo from the glasses (wired by StreamSessionView)
+  var photoCaptureHandler: (() async -> UIImage?)?
+  /// When true, video frames are NOT sent to Gemini (frees Bluetooth bandwidth for photo transfer)
+  var pauseVideoForScan: Bool = false
+
+  // MARK: - Local Tool Definitions
+
+  private static let scanDocumentToolName = "scan_document"
+
+  /// Gemini function declaration for the local scan_document tool
+  private static let scanDocumentDeclaration: [String: Any] = [
+    "name": scanDocumentToolName,
+    "description": "Captures a high-resolution photo from the smart glasses and uses OCR to read and extract all text and data from any document (business cards, invoices, receipts, IDs, etc.). Use this tool whenever the user asks to read, scan, or extract information from a document, or when the video stream quality is too low to read text clearly.",
+    "parameters": [
+      "type": "object",
+      "properties": [
+        "document_type": [
+          "type": "string",
+          "description": "Optional hint about what type of document to expect (e.g. 'business_card', 'invoice', 'receipt', 'id_card'). If not provided, the system will auto-detect."
+        ]
+      ]
+    ]
+  ]
+
   func startSession() async {
     guard !isGeminiActive else { return }
 
@@ -90,9 +114,10 @@ class GeminiSessionViewModel: ObservableObject {
     await mcpBridge.checkConnection()
     let mcpTools = await mcpBridge.fetchTools()
 
-    // Set dynamic tool declarations for Gemini
-    let declarations = mcpTools.map { $0.toGeminiFunctionDeclaration() }
-    AppLog("Session", "MCP connection: \(mcpBridge.connectionState), tools fetched: \(mcpTools.count), declarations: \(declarations.count)")
+    // Set dynamic tool declarations for Gemini (MCP tools + local tools)
+    var declarations = mcpTools.map { $0.toGeminiFunctionDeclaration() }
+    declarations.append(Self.scanDocumentDeclaration)
+    AppLog("Session", "MCP connection: \(mcpBridge.connectionState), tools fetched: \(mcpTools.count), declarations: \(declarations.count) (incl. local)")
     geminiService.toolDeclarations = declarations
 
     // Wire tool call handling
@@ -101,9 +126,25 @@ class GeminiSessionViewModel: ObservableObject {
     geminiService.onToolCall = { [weak self] toolCall in
       guard let self else { return }
       Task { @MainActor in
+        let currentSessionId = self.geminiService.sessionId
         for call in toolCall.functionCalls {
+          // Local tool: scan_document — handle on-device
+          if call.name == Self.scanDocumentToolName {
+            await self.handleScanDocument(call: call, sessionId: currentSessionId)
+            continue
+          }
+          // MCP tool: route to server
           self.toolCallRouter?.handleToolCall(call) { [weak self] response in
-            self?.geminiService.sendToolResponse(response)
+            guard let self else { return }
+            guard self.geminiService.sessionId == currentSessionId else {
+              AppLog("ToolCall", "Dropping stale response for session #\(currentSessionId) (now #\(self.geminiService.sessionId))")
+              return
+            }
+            guard self.isGeminiActive else {
+              AppLog("ToolCall", "Dropping response — session no longer active")
+              return
+            }
+            self.geminiService.sendToolResponse(response)
           }
         }
       }
@@ -185,6 +226,7 @@ class GeminiSessionViewModel: ObservableObject {
   }
 
   func stopSession() {
+    AppLog("Session", "stopSession() called — tearing down")
     eventClient.disconnect()
     toolCallRouter?.cancelAll()
     toolCallRouter = nil
@@ -198,9 +240,84 @@ class GeminiSessionViewModel: ObservableObject {
     userTranscript = ""
     aiTranscript = ""
     toolCallStatus = .idle
+    lastVideoFrameTime = .distantPast
+    errorMessage = nil
+    AppLog("Session", "stopSession() complete — all state reset")
+  }
+
+  // MARK: - Local Tool: scan_document
+
+  private func handleScanDocument(call: GeminiFunctionCall, sessionId: Int) async {
+    let callId = call.id
+    AppLog("Vision", "scan_document invoked (id: \(callId))")
+    toolCallStatus = .executing(call.name)
+
+    // Guard: still same session?
+    func sendResponse(_ result: [String: Any]) {
+      guard geminiService.sessionId == sessionId, isGeminiActive else {
+        AppLog("Vision", "Dropping scan_document response — session changed")
+        return
+      }
+      let response: [String: Any] = [
+        "toolResponse": [
+          "functionResponses": [
+            [
+              "id": callId,
+              "name": Self.scanDocumentToolName,
+              "response": result
+            ]
+          ]
+        ]
+      ]
+      geminiService.sendToolResponse(response)
+    }
+
+    // Step 1: Capture high-res photo
+    guard let captureHandler = photoCaptureHandler else {
+      AppLog("Vision", "No photo capture handler — glasses not streaming?")
+      sendResponse(["error": "Camera not available. Make sure glasses are streaming."])
+      toolCallStatus = .idle
+      return
+    }
+
+    AppLog("Vision", "Capturing high-res photo...")
+    guard let photo = await captureHandler() else {
+      AppLog("Vision", "Photo capture failed or timed out")
+      sendResponse(["error": "Failed to capture photo. Please try again."])
+      toolCallStatus = .idle
+      return
+    }
+
+    AppLog("Vision", "Photo captured: \(Int(photo.size.width))x\(Int(photo.size.height))")
+
+    // Step 2: Send to Gemini Vision REST API for OCR
+    do {
+      let documentType = call.args["document_type"] as? String
+      var prompt = GeminiVisionService.documentOCRPrompt
+      if let docType = documentType {
+        prompt += "\n\nHint: The user expects this to be a \(docType)."
+      }
+
+      let ocrResult = try await GeminiVisionService.analyzeImage(image: photo, prompt: prompt)
+      AppLog("Vision", "OCR complete: \(ocrResult.prefix(200))...")
+
+      // Try to parse as JSON to validate, but send raw text if it fails
+      if let jsonData = ocrResult.data(using: .utf8),
+         let jsonObj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+        sendResponse(jsonObj)
+      } else {
+        sendResponse(["raw_text": ocrResult])
+      }
+    } catch {
+      AppLog("Vision", "OCR failed: \(error.localizedDescription)")
+      sendResponse(["error": "Document scan failed: \(error.localizedDescription)"])
+    }
+
+    toolCallStatus = .idle
   }
 
   func sendVideoFrameIfThrottled(image: UIImage) {
+    guard !pauseVideoForScan else { return }
     guard SettingsManager.shared.videoStreamingEnabled else { return }
     guard SettingsManager.shared.sendFramesToGemini else { return }
     guard isGeminiActive, connectionState == .ready else { return }

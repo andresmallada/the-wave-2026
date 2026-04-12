@@ -62,6 +62,10 @@ class StreamSessionViewModel: ObservableObject {
   // Photo capture properties
   @Published var capturedPhoto: UIImage?
   @Published var showPhotoPreview: Bool = false
+  /// Pending continuation for programmatic photo capture (scan_document tool)
+  private var photoCaptureContination: CheckedContinuation<UIImage?, Never>?
+  /// True while scan_document is waiting for a photo — prevents late arrivals from triggering preview
+  private(set) var scanInProgress: Bool = false
 
   // Gemini Live integration
   var geminiSessionVM: GeminiSessionViewModel?
@@ -309,7 +313,21 @@ class StreamSessionViewModel: ObservableObject {
     photoDataListenerToken = streamSession.photoDataPublisher.listen { [weak self] photoData in
       Task { @MainActor [weak self] in
         guard let self else { return }
-        if let uiImage = UIImage(data: photoData.data) {
+        let sizeKB = photoData.data.count / 1024
+        AppLog("Vision", "photoDataPublisher fired: \(sizeKB)KB")
+        let uiImage = UIImage(data: photoData.data)
+        // If a programmatic capture is pending (scan_document tool), resolve it
+        if let cont = self.photoCaptureContination {
+          self.photoCaptureContination = nil
+          self.scanInProgress = false
+          AppLog("Vision", "Resolving scan continuation (image: \(uiImage != nil))")
+          cont.resume(returning: uiImage)
+        } else if self.scanInProgress {
+          // Late arrival after timeout — discard, don't show preview
+          self.scanInProgress = false
+          AppLog("Vision", "Late photo arrived after timeout — discarded")
+        } else if let uiImage {
+          // Normal user-initiated capture → show preview
           self.capturedPhoto = uiImage
           self.showPhotoPreview = true
         }
@@ -401,6 +419,57 @@ class StreamSessionViewModel: ObservableObject {
 
   func capturePhoto() {
     streamSession.capturePhoto(format: .jpeg)
+  }
+
+  /// Programmatic photo capture for AI tools (scan_document).
+  /// Triggers capture and awaits the result via photoDataPublisher.
+  /// Pauses Gemini video streaming while waiting to free Bluetooth bandwidth.
+  func capturePhotoForAnalysis() async -> UIImage? {
+    guard streamingStatus == .streaming else {
+      AppLog("Vision", "Cannot capture — not streaming")
+      return nil
+    }
+
+    scanInProgress = true
+
+    // Pause video frame sending to Gemini — frees Bluetooth bandwidth for photo transfer
+    geminiSessionVM?.pauseVideoForScan = true
+    AppLog("Vision", "Video streaming to Gemini paused for scan")
+
+    let result: UIImage? = await withCheckedContinuation { continuation in
+      self.photoCaptureContination = continuation
+      AppLog("Vision", "Calling streamSession.capturePhoto(format: .jpeg)")
+      self.streamSession.capturePhoto(format: .jpeg)
+
+      // Timeout: detached task so it's not delayed by main actor congestion
+      Task.detached { [weak self] in
+        try? await Task.sleep(nanoseconds: 15_000_000_000)
+        await MainActor.run {
+          guard let self else { return }
+          if let cont = self.photoCaptureContination {
+            self.photoCaptureContination = nil
+            AppLog("Vision", "Photo capture timed out after 15s")
+            cont.resume(returning: nil)
+          }
+        }
+      }
+    }
+
+    // Resume video streaming
+    geminiSessionVM?.pauseVideoForScan = false
+    if !scanInProgress {
+      // continuation was resolved by publisher, flag already cleared
+    } else {
+      // timeout path — keep scanInProgress true briefly to catch late arrivals
+      // (cleared by publisher listener or after a short delay)
+      Task {
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        self.scanInProgress = false
+      }
+    }
+    AppLog("Vision", "Video streaming to Gemini resumed")
+
+    return result
   }
 
   func dismissPhotoPreview() {
